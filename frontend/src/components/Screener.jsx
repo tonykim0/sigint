@@ -14,6 +14,12 @@ const SUB_TABS = [
   { id: 'breakout', label: '돌파 스윙' },
 ];
 
+function todayStr() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 // ── 공통 ──────────────────────────────────────────────────────────
 
 function FilterDot({ ok }) {
@@ -123,7 +129,7 @@ function WeightCalc() {
 
 function ClosingBetTab({ onSelectCode, onGoJournal }) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [memos, setMemos] = useState({});
 
@@ -137,7 +143,27 @@ function ClosingBetTab({ onSelectCode, onGoJournal }) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(false); }, []);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitial() {
+      try {
+        const result = await api.screener.closingBet({ force: false });
+        if (cancelled) return;
+        setData(result);
+        setErr(null);
+      } catch (e) {
+        if (!cancelled) setErr(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadInitial();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rows = useMemo(() => {
     if (!data?.stocks) return [];
@@ -261,9 +287,8 @@ function ClosingBetTab({ onSelectCode, onGoJournal }) {
                 <td className="py-2 px-2 text-center">
                   <button
                     onClick={() => {
-                      const today = new Date().toISOString().slice(0, 10);
                       api.journal.add({
-                        code: r.code, name: r.name, entry_date: today,
+                        code: r.code, name: r.name, entry_date: todayStr(),
                         entry_price: r.price, reason: 'closing_bet',
                         weight_pct: 0, memo: r.memo?.note || '',
                       }).then(() => onGoJournal?.()).catch(() => {});
@@ -297,7 +322,7 @@ const PB_FILTERS = [
 
 function PullbackTab({ onSelectCode }) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [memos, setMemos] = useState({});
 
@@ -311,7 +336,27 @@ function PullbackTab({ onSelectCode }) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(false); }, []);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitial() {
+      try {
+        const result = await api.screener.pullbackSwing({ force: false });
+        if (cancelled) return;
+        setData(result);
+        setErr(null);
+      } catch (e) {
+        if (!cancelled) setErr(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadInitial();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rows = useMemo(() => {
     if (!data?.stocks) return [];
@@ -428,7 +473,7 @@ const BO_FILTERS = [
 
 function BreakoutTab({ onSelectCode }) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
   const load = (force = false) => {
@@ -441,7 +486,27 @@ function BreakoutTab({ onSelectCode }) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(false); }, []);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitial() {
+      try {
+        const result = await api.screener.breakoutSwing({ force: false });
+        if (cancelled) return;
+        setData(result);
+        setErr(null);
+      } catch (e) {
+        if (!cancelled) setErr(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadInitial();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rows = data?.stocks || [];
 

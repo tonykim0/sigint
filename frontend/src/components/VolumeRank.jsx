@@ -106,7 +106,7 @@ export default function VolumeRank({ onSelectCode }) {
   const [market, setMarket] = useState('ALL');
   const [items, setItems] = useState([]);
   const [themes, setThemes] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [sort, setSort] = useState({ key: 'change_rate', dir: 'desc' });
   const [view, setView] = useState('list');
@@ -135,10 +135,28 @@ export default function VolumeRank({ onSelectCode }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchItems(market).catch(() => {});
+
+    async function refreshItems() {
+      try {
+        const data = await api.volumeRank({ market, topN: 60 });
+        if (cancelled) return;
+        setItems(data.items || []);
+        setLastUpdated(new Date());
+        setErr(null);
+      } catch (e) {
+        if (!cancelled) {
+          setItems([]);
+          setErr(e.message);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void refreshItems();
     if (refreshSec === 0 || !isMarketOpen()) return;
     const id = setInterval(() => {
-      if (!cancelled) fetchItems(market);
+      if (!cancelled) void refreshItems();
     }, refreshSec * 1000);
     return () => { cancelled = true; clearInterval(id); };
   }, [market, refreshSec]);

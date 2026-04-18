@@ -31,7 +31,14 @@ const CHART_OPTIONS = {
   autoSize: true,
 };
 
-function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
+function toChartTime(b, isIntraday) {
+  if (!isIntraday) return b.date;
+  // "2026-04-18 16:35:00" → Unix seconds (KST assumed)
+  const str = b.time || `${b.date} 09:00:00`;
+  return Math.floor(new Date(str.replace(' ', 'T') + '+09:00').getTime() / 1000);
+}
+
+function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles, isIntraday }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef({});
@@ -39,7 +46,14 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const chart = createChart(containerRef.current, CHART_OPTIONS);
+    const chart = createChart(containerRef.current, {
+      ...CHART_OPTIONS,
+      timeScale: {
+        ...CHART_OPTIONS.timeScale,
+        timeVisible: isIntraday,
+        secondsVisible: false,
+      },
+    });
     const candle = chart.addSeries(CandlestickSeries, {
       upColor: '#ef4444',
       downColor: '#3b82f6',
@@ -84,7 +98,7 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
       chartRef.current = null;
       seriesRef.current = {};
     };
-  }, []);
+  }, [isIntraday]);
 
   useEffect(() => {
     if (!chartRef.current || !bars) return;
@@ -92,7 +106,7 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
       seriesRef.current;
     candle.setData(
       bars.map((b) => ({
-        time: b.date,
+        time: toChartTime(b, isIntraday),
         open: b.open,
         high: b.high,
         low: b.low,
@@ -101,7 +115,7 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
     );
     volume.setData(
       bars.map((b) => ({
-        time: b.date,
+        time: toChartTime(b, isIntraday),
         value: b.volume,
         color: b.close >= b.open ? '#ef444488' : '#3b82f688',
       })),
@@ -109,7 +123,7 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
 
     const toLine = (series) =>
       bars
-        .map((b, i) => ({ time: b.date, value: series?.[i] }))
+        .map((b, i) => ({ time: toChartTime(b, isIntraday), value: series?.[i] }))
         .filter((d) => d.value != null);
     ma5Series.setData(toLine(ma5));
     ma20Series.setData(toLine(ma20));
@@ -350,15 +364,29 @@ function SearchBox({ onSelect }) {
   );
 }
 
+const TIMEFRAMES = [
+  { id: 'D', label: '일봉' },
+  { id: '60', label: '60분' },
+  { id: '30', label: '30분' },
+  { id: '15', label: '15분' },
+  { id: '5', label: '5분' },
+  { id: '1', label: '1분' },
+];
+
 export default function ChartAnalysis({ initialCode }) {
   const seedCode = initialCode || '005930';
   const [input, setInput] = useState(seedCode);
   const [code, setCode] = useState(seedCode);
+  const [timeframe, setTimeframe] = useState('D');
+  const [requestKey, setRequestKey] = useState(0);
   const [price, setPrice] = useState(null);
   const [chart, setChart] = useState(null);
+  const [minuteBars, setMinuteBars] = useState(null);
   const [patterns, setPatterns] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+
+  const isIntraday = timeframe !== 'D';
 
   function submitCode(nextValue = input) {
     const normalized = nextValue.replace(/\D/g, '').slice(0, 6);
@@ -371,11 +399,13 @@ export default function ChartAnalysis({ initialCode }) {
     setErr(null);
     setPatterns(null);
     setCode(normalized);
+    setRequestKey((key) => key + 1);
   }
 
   useEffect(() => {
     if (!/^\d{6}$/.test(code)) return;
     let cancelled = false;
+    setLoading(true);
 
     Promise.all([api.price(code), api.chart(code, { days: 120 })])
       .then(([p, c]) => {
@@ -390,7 +420,7 @@ export default function ChartAnalysis({ initialCode }) {
         setErr(e.message);
       })
       .finally(() => !cancelled && setLoading(false));
-    // 패턴 분석 (별도 — 느려도 UI 블로킹 안 함)
+    // 패턴 분석 (별도 — 일봉 기준 분석이므로 일봉일 때만 의미)
     Promise.all([
       api.screener.trendTemplate(code).catch(() => null),
       api.screener.vcp(code).catch(() => null),
@@ -400,10 +430,27 @@ export default function ChartAnalysis({ initialCode }) {
       if (!cancelled) setPatterns({ trendTemplate: tt, vcp, darvas, refCandles });
     });
     return () => { cancelled = true; };
-  }, [code]);
+  }, [code, requestKey]);
+
+  // 분봉 데이터 로드 (timeframe 변경 시)
+  useEffect(() => {
+    if (!/^\d{6}$/.test(code) || !isIntraday) {
+      setMinuteBars(null);
+      return;
+    }
+    let cancelled = false;
+    api.minuteChart(code, { timeUnit: parseInt(timeframe, 10) })
+      .then((d) => { if (!cancelled) setMinuteBars(d.bars || []); })
+      .catch(() => { if (!cancelled) setMinuteBars([]); });
+    return () => { cancelled = true; };
+  }, [code, timeframe, isIntraday, requestKey]);
 
   const analysis = chart?.analysis;
-  const bars = chart?.bars;
+  const dailyBars = chart?.bars;
+  const activeBars = isIntraday ? minuteBars : dailyBars;
+  const chartTitle = isIntraday
+    ? `${timeframe}분봉 + 거래량`
+    : '일봉 + 이평선 + 거래량';
 
   return (
     <div className="space-y-4">
@@ -451,19 +498,40 @@ export default function ChartAnalysis({ initialCode }) {
         </div>
       </Card>
 
-      <Card title="일봉 + 이평선 + 거래량">
-        {bars && bars.length > 0 ? (
+      <Card
+        title={chartTitle}
+        right={
+          <div className="flex items-center gap-0.5 rounded-md overflow-hidden border border-border">
+            {TIMEFRAMES.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTimeframe(t.id)}
+                className={`px-2.5 py-1 text-xs transition-colors ${
+                  timeframe === t.id
+                    ? 'bg-accent/15 text-accent font-semibold'
+                    : 'text-fg-muted hover:text-fg-bright'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        }
+      >
+        {activeBars && activeBars.length > 0 ? (
           <CandleChart
-            bars={bars}
-            ma5={analysis?.ma5}
-            ma20={analysis?.ma20}
-            ma60={analysis?.ma60}
-            darvas={patterns?.darvas}
-            refCandles={patterns?.refCandles?.candles}
+            key={`${code}-${timeframe}`}
+            bars={activeBars}
+            ma5={isIntraday ? null : analysis?.ma5}
+            ma20={isIntraday ? null : analysis?.ma20}
+            ma60={isIntraday ? null : analysis?.ma60}
+            darvas={isIntraday ? null : patterns?.darvas}
+            refCandles={isIntraday ? null : patterns?.refCandles?.candles}
+            isIntraday={isIntraday}
           />
         ) : (
           <div className="h-[420px] flex items-center justify-center text-fg-muted text-sm">
-            {loading ? '차트 로딩…' : '차트 데이터 없음'}
+            {loading ? '차트 로딩…' : isIntraday ? '장외 시간 — 분봉 데이터 없음' : '차트 데이터 없음'}
           </div>
         )}
       </Card>
