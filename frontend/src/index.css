@@ -1,0 +1,58 @@
+@import url('https://static.toss.im/assets/typography/TossProductSans.css');
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: #06070a;
+  color: #e5e7eb;
+}
+
+body {
+  margin: 0;
+  font-family: 'Toss Product Sans', 'Pretendard Variable', Pretendard,
+    -apple-system, BlinkMacSystemFont, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0f13;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2228;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2f37;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.status-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}

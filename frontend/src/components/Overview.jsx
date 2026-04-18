@@ -1,0 +1,280 @@
+import { useEffect, useMemo, useState } from 'react';
+import { api } from '../utils/api.js';
+import {
+  changeColor,
+  formatChangeRate,
+  formatInt,
+  formatKRWCompact,
+} from '../utils/format.js';
+import Card from './Card.jsx';
+
+// ── 타임테이블 ─────────────────────────────────────────────────────
+const TIMETABLE = [
+  { start: 540, end: 560, label: '수확/투매', color: 'bg-warn/20 text-warn border-warn/40', active: 'bg-warn/30 border-warn text-warn font-bold' },
+  { start: 560, end: 660, label: '프라임 타임', color: 'bg-accent/10 text-accent border-accent/30', active: 'bg-accent/25 border-accent text-accent font-bold' },
+  { start: 660, end: 870, label: '매매 금지', color: 'bg-down/10 text-down border-down/20', active: 'bg-down/25 border-down text-down font-bold' },
+  { start: 870, end: 920, label: '종가매매 준비', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30', active: 'bg-blue-500/25 border-blue-400 text-blue-300 font-bold' },
+  { start: 920, end: 1440, label: '데이터 정리', color: 'bg-inst/10 text-inst border-inst/20', active: 'bg-inst/25 border-inst text-inst font-bold' },
+];
+
+function formatMinutes(m) {
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+function currentSlot(now = new Date()) {
+  const mins = now.getHours() * 60 + now.getMinutes();
+  return TIMETABLE.find((s) => mins >= s.start && mins < s.end) ?? null;
+}
+
+function TimetableBar() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const active = currentSlot(now);
+  return (
+    <Card title="매매 타임테이블" subtitle={active ? `현재: ${active.label}` : '장외'}>
+      <div className="grid grid-cols-5 gap-2">
+        {TIMETABLE.map((s) => {
+          const isActive = active?.label === s.label;
+          return (
+            <div
+              key={s.label}
+              className={`p-2 sm:p-3 rounded-md border text-xs text-center transition-all ${
+                isActive ? s.active : `${s.color} opacity-60`
+              }`}
+            >
+              <div className="text-[10px] opacity-70 hidden sm:block">
+                {formatMinutes(s.start)}~{formatMinutes(s.end)}
+              </div>
+              <div className="mt-0.5">{s.label}</div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+// ── 지수 카드 ────────────────────────────────────────────────────
+function IndexCard({ label, data, loading }) {
+  if (loading || !data)
+    return (
+      <div className="bg-bg-card border border-border rounded-xl p-[18px]">
+        <div className="text-xs text-fg-muted mb-1">{label}</div>
+        <div className="text-fg-muted text-sm">{loading ? '조회 중…' : '—'}</div>
+      </div>
+    );
+  return (
+    <div className="bg-bg-card border border-border rounded-xl p-[18px]">
+      <div className="text-xs text-fg-muted mb-1">{label}</div>
+      <div className="text-xl font-bold text-fg-white tabular-nums">
+        {formatInt(data.price)}
+      </div>
+      <div className={`text-sm font-semibold ${changeColor(data.change_rate)}`}>
+        {formatChangeRate(data.change_rate)}
+        {data.prev_diff != null && (
+          <span className="ml-1 text-xs">
+            {data.prev_diff > 0 ? '▲' : data.prev_diff < 0 ? '▼' : ''}
+            {data.prev_diff !== 0 && formatInt(Math.abs(data.prev_diff))}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 주도 테마 (themes.json 기반) ─────────────────────────────────
+function buildThemesFromAPI(rankItems, codeThemeMap) {
+  const map = {};
+  for (const r of rankItems) {
+    const entry = codeThemeMap[r.code];
+    if (!entry) continue;
+    const t = entry.theme;
+    if (!map[t]) map[t] = { theme: t, color: entry.color, count: 0, value: 0, leader: null };
+    map[t].count += 1;
+    map[t].value += r.trade_value || 0;
+    if (!map[t].leader || r.change_rate > map[t].leader.change_rate) {
+      map[t].leader = r;
+    }
+  }
+  return Object.values(map).sort((a, b) => b.value - a.value);
+}
+
+// ── 외국인 순매수 TOP 5 ────────────────────────────────────────
+function ForeignTop5({ items, onSelectCode }) {
+  const top5 = useMemo(
+    () => [...(items || [])].sort((a, b) => b.foreign_value - a.foreign_value).slice(0, 5),
+    [items],
+  );
+  return (
+    <Card title="외국인 순매수 TOP 5" subtitle="거래대금 상위 기준">
+      <div className="space-y-2">
+        {top5.map((r) => (
+          <button
+            key={r.code}
+            onClick={() => onSelectCode?.(r.code)}
+            className="w-full flex items-center gap-3 hover:bg-bg-inner rounded-md px-2 py-1.5 transition-colors"
+          >
+            <span
+              className={`shrink-0 w-1.5 h-8 rounded-full ${
+                r.foreign_value > 0 ? 'bg-up' : 'bg-down'
+              }`}
+            />
+            <div className="flex-1 text-left min-w-0">
+              <div className="text-sm text-fg-white font-semibold truncate">{r.name}</div>
+              <div className="text-[11px] text-fg-muted">{r.code}</div>
+            </div>
+            <div className="text-right tabular-nums shrink-0">
+              <div className={`text-sm font-semibold ${r.foreign_value > 0 ? 'text-up' : 'text-down'}`}>
+                {r.foreign_value > 0 ? '+' : ''}{formatKRWCompact(r.foreign_value)}
+              </div>
+              <div className={`text-xs ${changeColor(r.change_rate)}`}>
+                {formatChangeRate(r.change_rate)}
+              </div>
+            </div>
+          </button>
+        ))}
+        {top5.length === 0 && (
+          <div className="text-xs text-fg-muted py-4 text-center">데이터 없음</div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ── 메인 ──────────────────────────────────────────────────────────
+export default function Overview({ onSelectCode }) {
+  const [top, setTop] = useState([]);
+  const [indexData, setIndexData] = useState(null);
+  const [investorItems, setInvestorItems] = useState([]);
+  const [themes, setThemes] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [indexLoading, setIndexLoading] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    // 테마 맵 로드
+    api.themes().then((d) => setThemes(d.themes || {})).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setIndexLoading(true);
+
+    // 지수 병렬 조회
+    api.index()
+      .then((d) => { if (!cancelled) setIndexData(d); })
+      .catch(() => {})
+      .finally(() => !cancelled && setIndexLoading(false));
+
+    // 거래대금 TOP 30 + 외국인 요약
+    Promise.all([
+      api.volumeRank({ topN: 30 }),
+      api.investorSummary(10),
+    ])
+      .then(([rankData, invData]) => {
+        if (cancelled) return;
+        setTop(rankData.items || []);
+        setInvestorItems(invData.items || []);
+      })
+      .catch((e) => !cancelled && setErr(e.message))
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => { cancelled = true; };
+  }, []);
+
+  const codeThemeMap = useMemo(() => {
+    const map = {};
+    for (const [theme, info] of Object.entries(themes)) {
+      for (const code of info.codes || []) {
+        map[code] = { theme, color: info.color };
+      }
+    }
+    return map;
+  }, [themes]);
+
+  const themeList = useMemo(
+    () => buildThemesFromAPI(top, codeThemeMap),
+    [top, codeThemeMap],
+  );
+
+  const totalTrade = useMemo(
+    () => top.slice(0, 10).reduce((s, r) => s + (r.trade_value || 0), 0),
+    [top],
+  );
+
+  return (
+    <div className="space-y-4">
+      <TimetableBar />
+
+      {/* 지수 + 총 거래대금 */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <IndexCard label="KOSPI" data={indexData?.kospi} loading={indexLoading} />
+        <IndexCard label="KOSDAQ" data={indexData?.kosdaq} loading={indexLoading} />
+        <div className="bg-bg-card border border-border rounded-xl p-[18px] col-span-2 sm:col-span-1">
+          <div className="text-xs text-fg-muted mb-1">TOP 10 총 거래대금</div>
+          <div className="text-xl font-bold text-fg-white">{formatKRWCompact(totalTrade)}</div>
+          <div className="text-xs text-fg-muted mt-1">{top.length > 0 ? `${Math.min(top.length, 10)}개 종목` : '—'}</div>
+        </div>
+      </div>
+
+      {/* 주도 테마 */}
+      <Card title="오늘의 주도 테마" subtitle="거래대금 기준 자동 추출">
+        {themeList.length === 0 ? (
+          <div className="text-xs text-fg-muted">{loading ? '조회 중…' : '감지된 테마 없음'}</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {themeList.map((t, i) => (
+              <div
+                key={t.theme}
+                className="flex items-center gap-2 px-3 py-2 rounded-md bg-bg-inner border border-border"
+                style={{ borderColor: i === 0 ? `${t.color}60` : undefined }}
+              >
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: t.color }} />
+                <div>
+                  <span className="text-sm text-fg-white font-semibold">{t.theme}</span>
+                  <span className="text-xs text-fg-muted ml-1">({t.count}종목)</span>
+                  {t.leader && (
+                    <span className={`ml-2 text-xs ${changeColor(t.leader.change_rate)}`}>
+                      {t.leader.name} {formatChangeRate(t.leader.change_rate)}
+                    </span>
+                  )}
+                  <div className="text-xs text-accent">{formatKRWCompact(t.value)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* 거래대금 TOP 10 그리드 + 외국인 순매수 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card title="거래대금 TOP 10" right={err && <span className="text-warn text-xs">{err}</span>} className="lg:col-span-2">
+          {loading && <div className="text-xs text-fg-muted mb-2">조회 중…</div>}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            {top.slice(0, 10).map((r) => (
+              <button
+                key={r.code}
+                onClick={() => onSelectCode?.(r.code)}
+                className="text-left p-2 sm:p-3 rounded-md bg-bg-inner border border-border hover:border-accent/60 transition-colors"
+              >
+                <div className="text-sm text-fg-white font-bold truncate">{r.name}</div>
+                <div className="text-[10px] text-fg-muted">{r.code}</div>
+                <div className="mt-1.5 text-sm text-fg-white tabular-nums">{formatInt(r.price)}</div>
+                <div className={`text-xs ${changeColor(r.change_rate)}`}>{formatChangeRate(r.change_rate)}</div>
+                <div className="text-[10px] text-fg-muted mt-0.5">{formatKRWCompact(r.trade_value)}</div>
+              </button>
+            ))}
+            {top.length === 0 && !loading && (
+              <div className="col-span-5 py-8 text-center text-fg-muted text-sm">데이터 없음</div>
+            )}
+          </div>
+        </Card>
+        <ForeignTop5 items={investorItems} onSelectCode={onSelectCode} />
+      </div>
+    </div>
+  );
+}
