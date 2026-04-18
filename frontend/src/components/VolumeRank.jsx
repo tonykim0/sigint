@@ -108,7 +108,7 @@ export default function VolumeRank({ onSelectCode }) {
   const [themes, setThemes] = useState({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
-  const [sort, setSort] = useState({ key: 'change_rate', dir: 'desc' });
+  const [sort, setSort] = useState({ key: 'trade_value', dir: 'desc' });
   const [view, setView] = useState('list');
   const [refreshSec, setRefreshSec] = useState(15);
   const [lastUpdated, setLastUpdated] = useState(null);
