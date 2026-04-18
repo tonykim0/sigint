@@ -3,21 +3,37 @@
 
 const BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
 
-async function request(path, { method = 'GET', body } = {}) {
+// 스크리너는 첫 요청 시 KIS 호출이 30여 개 누적돼 20초까지 걸릴 수 있어 별도 TTL 적용.
+const DEFAULT_TIMEOUT_MS = 15000;
+const SCREENER_TIMEOUT_MS = 30000;
+
+async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT_MS } = {}) {
   const init = { method };
   if (body !== undefined) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(body);
   }
-  const resp = await fetch(`${BASE}${path}`, init);
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
+  const controller = new AbortController();
+  const timerId = setTimeout(() => controller.abort(), timeout);
+  init.signal = controller.signal;
+  try {
+    const resp = await fetch(`${BASE}${path}`, init);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
+    }
+    return await resp.json();
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`요청 시간 초과 (${Math.round(timeout / 1000)}s)`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timerId);
   }
-  return resp.json();
 }
 
-const getJSON = (p) => request(p);
+const getJSON = (p, opts) => request(p, opts);
 
 export const api = {
   health: () => getJSON('/api/health'),
@@ -37,13 +53,21 @@ export const api = {
   themes: () => getJSON('/api/themes'),
   screener: {
     closingBet: ({ force = false } = {}) =>
-      getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`),
+      getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`, {
+        timeout: SCREENER_TIMEOUT_MS,
+      }),
     marketRegime: ({ force = false } = {}) =>
-      getJSON(`/api/screener/market-regime${force ? '?force=true' : ''}`),
+      getJSON(`/api/screener/market-regime${force ? '?force=true' : ''}`, {
+        timeout: SCREENER_TIMEOUT_MS,
+      }),
     pullbackSwing: ({ force = false } = {}) =>
-      getJSON(`/api/screener/pullback-swing${force ? '?force=true' : ''}`),
+      getJSON(`/api/screener/pullback-swing${force ? '?force=true' : ''}`, {
+        timeout: SCREENER_TIMEOUT_MS,
+      }),
     breakoutSwing: ({ force = false } = {}) =>
-      getJSON(`/api/screener/breakout-swing${force ? '?force=true' : ''}`),
+      getJSON(`/api/screener/breakout-swing${force ? '?force=true' : ''}`, {
+        timeout: SCREENER_TIMEOUT_MS,
+      }),
     trendTemplate: (code) => getJSON(`/api/screener/trend-template/${code}`),
     vcp: (code) => getJSON(`/api/screener/vcp/${code}`),
     darvasBox: (code) => getJSON(`/api/screener/darvas-box/${code}`),
@@ -52,7 +76,9 @@ export const api = {
   },
   // keep legacy key for backwards compat
   closingBet: ({ force = false } = {}) =>
-    getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`),
+    getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`, {
+      timeout: SCREENER_TIMEOUT_MS,
+    }),
   journal: {
     list: () => getJSON('/api/journal'),
     stats: () => getJSON('/api/journal/stats'),

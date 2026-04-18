@@ -7,6 +7,7 @@ import SupplyDemand from './components/SupplyDemand.jsx';
 import ChartAnalysis from './components/ChartAnalysis.jsx';
 import Screener from './components/Screener.jsx';
 import Journal from './components/Journal.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { api } from './utils/api.js';
 
 const TABS = [
@@ -59,17 +60,21 @@ export default function App() {
       )}
       <TabNav tabs={TABS} active={tab} onChange={setTab} />
       <main className="max-w-[1400px] mx-auto px-3 sm:px-6 py-4 sm:py-6">
-        {tab === 'overview' && <Overview onSelectCode={goToChart} />}
-        {tab === 'volume' && <VolumeRank onSelectCode={goToChart} />}
-        {tab === 'supply' && <SupplyDemand onSelectCode={goToChart} />}
-        {tab === 'chart' && (
-          <ChartAnalysis
-            key={selectedCode || 'default-chart'}
-            initialCode={selectedCode}
-          />
-        )}
-        {tab === 'screener' && <Screener onSelectCode={goToChart} onGoJournal={() => setTab('journal')} />}
-        {tab === 'journal' && <Journal />}
+        <ErrorBoundary key={tab}>
+          {tab === 'overview' && <Overview onSelectCode={goToChart} />}
+          {tab === 'volume' && <VolumeRank onSelectCode={goToChart} />}
+          {tab === 'supply' && <SupplyDemand onSelectCode={goToChart} />}
+          {tab === 'chart' && (
+            <ChartAnalysis
+              key={selectedCode || 'default-chart'}
+              initialCode={selectedCode}
+            />
+          )}
+          {tab === 'screener' && (
+            <Screener onSelectCode={goToChart} onGoJournal={() => setTab('journal')} />
+          )}
+          {tab === 'journal' && <Journal />}
+        </ErrorBoundary>
       </main>
     </div>
   );

@@ -13,11 +13,24 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from kis_client import KISError, daily_chart
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    """'YYYY-MM-DD' 또는 'YYYYMMDD' 형식을 date 로. 실패 시 None."""
+    if not value:
+        return None
+    s = str(value).strip()
+    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 DATA_FILE = Path(__file__).parent / "data" / "journal.json"
 _LOCK = threading.Lock()
@@ -148,7 +161,15 @@ def refresh_tracking(entry_id: str) -> Optional[dict[str, Any]]:
     except KISError:
         return entry
 
-    after = [b for b in bars if b.get("date", "") > entry["entry_date"]]
+    entry_d = _parse_date(entry["entry_date"])
+    if entry_d is None:
+        return entry
+
+    after = []
+    for b in bars:
+        bar_d = _parse_date(b.get("date", ""))
+        if bar_d is not None and bar_d > entry_d:
+            after.append(b)
     after.sort(key=lambda b: b["date"])
 
     def pick(n: int) -> Optional[float]:

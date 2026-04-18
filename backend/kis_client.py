@@ -5,6 +5,7 @@ import json
 import os
 import time
 import threading
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,33 @@ BASE_URL = (
 TOKEN_CACHE_PATH = Path(__file__).with_name(".token_cache.json")
 _TOKEN_LOCK = threading.Lock()
 _TOKEN_STATE: dict[str, Any] = {"access_token": None, "expires_at": 0.0}
+
+
+# ─────────────── Rate Limiter ───────────────
+# KIS 문서: 초당 20건 제한. ThreadPoolExecutor 여러 워커가 동시 호출할 때 EGW00201 에러를
+# 유발하지 않도록 전역 sliding-window 리미터로 18/s 선에서 제한 (안전 마진).
+
+class _RateLimiter:
+    def __init__(self, max_per_sec: int = 18, window: float = 1.0) -> None:
+        self.max = max_per_sec
+        self.window = window
+        self._ts: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        while True:
+            now = time.monotonic()
+            with self._lock:
+                while self._ts and self._ts[0] < now - self.window:
+                    self._ts.popleft()
+                if len(self._ts) < self.max:
+                    self._ts.append(now)
+                    return
+                wait = self.window - (now - self._ts[0])
+            time.sleep(max(wait, 0.01))
+
+
+_RATE_LIMITER = _RateLimiter(max_per_sec=18)
 
 
 class KISError(RuntimeError):
@@ -82,7 +110,12 @@ def _issue_token() -> str:
 
 
 def get_access_token(force_refresh: bool = False) -> str:
-    """유효한 Bearer 토큰 반환. 만료 5분 전부터 자동 재발급."""
+    """유효한 Bearer 토큰 반환. 만료 5분 전부터 자동 재발급.
+
+    전체 함수를 _TOKEN_LOCK 로 감싸 동시 호출 시 중복 발급을 방지한다.
+    토큰 발급이 네트워크 I/O 라 짧게 블로킹되지만, 하루에 1~2회 발생하는 일이라
+    정확성이 성능보다 중요하다.
+    """
     with _TOKEN_LOCK:
         if not force_refresh and _TOKEN_STATE["access_token"] is None:
             _load_token_from_disk()
@@ -109,11 +142,12 @@ def _headers(tr_id: str) -> dict[str, str]:
 
 
 def _get(path: str, tr_id: str, params: dict[str, Any]) -> dict[str, Any]:
-    """KIS GET 요청 + 401 재인증 + 429/EGW00201 재시도 + rt_cd 검증."""
+    """KIS GET 요청 + 전역 rate-limit + 401 재인증 + 429/EGW00201 재시도 + rt_cd 검증."""
     url = f"{BASE_URL}{path}"
     attempts = 0
     while True:
         attempts += 1
+        _RATE_LIMITER.acquire()
         resp = requests.get(url, headers=_headers(tr_id), params=params, timeout=10)
 
         if resp.status_code == 401 and attempts <= 2:

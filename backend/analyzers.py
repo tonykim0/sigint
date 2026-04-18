@@ -284,12 +284,20 @@ def darvas_box(bars: list[dict[str, Any]], lookback: int = 60) -> Optional[dict[
     if box_bottom is None:
         box_bottom = min(post_lows) if post_lows else None
 
+    top_distance_pct = None
+    if box_top is not None and current_price > 0:
+        top_distance_pct = round((box_top / current_price - 1) * 100, 2)
+
+    box_width_pct = None
+    if box_top is not None and box_bottom is not None and box_bottom > 0:
+        box_width_pct = round((box_top / box_bottom - 1) * 100, 2)
+
     return {
         "box_top": box_top,
         "box_bottom": box_bottom,
         "current_price": current_price,
-        "top_distance_pct": round((box_top / current_price - 1) * 100, 2) if box_top else None,
-        "box_width_pct": round((box_top / box_bottom - 1) * 100, 2) if (box_top and box_bottom) else None,
+        "top_distance_pct": top_distance_pct,
+        "box_width_pct": box_width_pct,
     }
 
 

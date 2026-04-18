@@ -1,17 +1,21 @@
 """스크리너 모음: 종가배팅 · 눌림목 스윙 · 돌파 스윙 · 시황 판단.
 
-거래대금 TOP 50 종목에 대해 필터 5개를 평가하고 pass_count와 함께 반환.
+거래대금 TOP 30 종목에 대해 필터 5개를 평가하고 pass_count와 함께 반환.
 (6번째 '재료/이슈'는 프론트에서 수동 메모로 처리.)
 
+성능 전략 (종가 기준 데이터라 초단위 정확도 불필요):
+  - daily_chart / inquire_investor / daily_index_chart 는 kis_cache 로 2h 디스크 캐시
+    → 3개 스크리너가 동일 종목 데이터를 공유 (총 API 호출 ~90 → ~30)
+    → 프로세스 재시작 후에도 캐시 유지
+  - 스크리너 결과 자체도 메모리에 300s (5분) TTL 로 보관
+  - 서버 기동 시 warm_cache() 가 백그라운드로 top 30 을 미리 pull → 첫 요청 즉시 응답
+
 필터:
-  1. volume_rank    : TOP 50 이내 → 항상 True (선별 기준)
+  1. volume_rank    : TOP 30 이내 → 항상 True (선별 기준)
   2. dual_buy       : 최근 영업일 외국인 + 기관 동시 순매수 금액 > 0
   3. intraday_trend : 14:00 이후 30분봉 구간에서 현재가 위치 >= 저점~고점의 중간
   4. relative_strength : 종목 등락률 > KOSPI 등락률 AND 종목 등락률 > 0
   5. chart_position : 현재가 >= 60일 최고가의 90%
-
-동시성은 ThreadPoolExecutor(5) — 종목당 3 call × 50 = 150 call 을 약 5~10초에 끝낸다.
-결과는 TTL 60초 메모리 캐시.
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ from datetime import datetime
 from typing import Any
 
 import analyzers
+from kis_cache import cached_call
 from kis_client import (
     KISError,
     aggregate_minute_bars,
@@ -36,10 +41,51 @@ from kis_client import (
 _CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 _SWING_CACHE: dict[str, Any] = {"pullback": None, "breakout": None, "ts_pb": 0.0, "ts_br": 0.0}
 _REGIME_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
-_CACHE_TTL = 60.0
+_CACHE_TTL = 300.0  # 스크리너 결과 메모리 TTL: 5분 (종가 기준이라 짧을 필요 없음)
+_DAILY_TTL = 7200.0  # daily_chart / investor 디스크 캐시: 2시간
+_INTRADAY_TTL = 60.0  # 분봉 / 지수 현재가: 60초
 _CACHE_LOCK = threading.Lock()
 _SWING_LOCK = threading.Lock()
 _REGIME_LOCK = threading.Lock()
+
+
+# ─────────────────────────── 캐시 래퍼 ────────────────────────────
+# 3개 스크리너가 동일 종목의 daily_chart 를 공유하도록 최장 lookback (200) 으로 고정.
+
+def _cached_daily(code: str) -> list[dict[str, Any]]:
+    return cached_call(
+        daily_chart, code, 200,
+        _ttl=_DAILY_TTL, _fn_name="kis.daily_chart",
+    )
+
+
+def _cached_investor(code: str) -> list[dict[str, Any]]:
+    return cached_call(
+        inquire_investor, code,
+        _ttl=_DAILY_TTL, _fn_name="kis.inquire_investor",
+    )
+
+
+def _cached_index_price(code: str) -> dict[str, Any]:
+    return cached_call(
+        index_price, code,
+        _ttl=_INTRADAY_TTL, _fn_name="kis.index_price",
+    )
+
+
+def _cached_daily_index(code: str, days: int = 30) -> list[dict[str, Any]]:
+    return cached_call(
+        daily_index_chart, code, days,
+        _ttl=_DAILY_TTL, _fn_name="kis.daily_index_chart",
+    )
+
+
+def _cached_volume_rank(market: str = "ALL") -> list[dict[str, Any]]:
+    # 거래대금 순위는 장중 변화가 커 짧은 TTL
+    return cached_call(
+        volume_rank, market,
+        _ttl=_INTRADAY_TTL, _fn_name="kis.volume_rank",
+    )
 
 
 def _evaluate_filters(
@@ -90,17 +136,18 @@ def _evaluate_filters(
 
 
 def _fetch_stock_data(code: str) -> dict[str, Any]:
-    """종목 1개에 필요한 3-API 순차 조회. 부분 실패는 빈 컬렉션으로."""
+    """종목 1개에 필요한 3-API 조회 (캐시 경유). 부분 실패는 빈 컬렉션으로."""
     out: dict[str, Any] = {"investor": [], "daily": [], "minute30": []}
     try:
-        out["investor"] = inquire_investor(code)
+        out["investor"] = _cached_investor(code)
     except KISError:
         pass
     try:
-        out["daily"] = daily_chart(code, days=60)
+        out["daily"] = _cached_daily(code)
     except KISError:
         pass
     try:
+        # 분봉은 장중 실시간 흐름 확인용이라 캐싱하지 않음 (TTL 60s 수준은 효용 작음)
         raw = minute_chart(code)
         out["minute30"] = aggregate_minute_bars(raw, 30)
     except KISError:
@@ -114,11 +161,11 @@ def closing_bet(force: bool = False) -> dict[str, Any]:
         if not force and _CACHE["data"] and now - _CACHE["ts"] < _CACHE_TTL:
             return _CACHE["data"]
 
-    rank = volume_rank("ALL")[:30]
+    rank = _cached_volume_rank("ALL")[:30]
 
     with ThreadPoolExecutor(max_workers=3) as ex:
-        kospi_f = ex.submit(index_price, "0001")
-        kosdaq_f = ex.submit(index_price, "1001")
+        kospi_f = ex.submit(_cached_index_price, "0001")
+        kosdaq_f = ex.submit(_cached_index_price, "1001")
         data_futures = {
             s["code"]: ex.submit(_fetch_stock_data, s["code"]) for s in rank
         }
@@ -150,9 +197,9 @@ def closing_bet(force: bool = False) -> dict[str, Any]:
             }
         )
 
-    # pass_count 내림차순 → 거래대금 내림차순
+    # pass_count 내림차순 → 거래대금 내림차순 → 종목코드 (stable tie-breaker)
     stocks.sort(
-        key=lambda r: (-r["pass_count"], -r["trade_value"]),
+        key=lambda r: (-r["pass_count"], -r["trade_value"], r["code"]),
     )
 
     result = {
@@ -184,24 +231,24 @@ def market_regime(force: bool = False) -> dict[str, Any]:
         if not force and _REGIME_CACHE["data"] and now - _REGIME_CACHE["ts"] < _CACHE_TTL:
             return _REGIME_CACHE["data"]
 
-    kospi = {}
-    kosdaq = {}
+    kospi: dict[str, Any] = {}
+    kosdaq: dict[str, Any] = {}
     kospi_bars: list[dict[str, Any]] = []
     kosdaq_bars: list[dict[str, Any]] = []
     try:
-        kospi = index_price("0001")
+        kospi = _cached_index_price("0001")
     except KISError:
         pass
     try:
-        kospi_bars = daily_index_chart("0001", days=30)
+        kospi_bars = _cached_daily_index("0001", 30)
     except KISError:
         pass
     try:
-        kosdaq = index_price("1001")
+        kosdaq = _cached_index_price("1001")
     except KISError:
         pass
     try:
-        kosdaq_bars = daily_index_chart("1001", days=30)
+        kosdaq_bars = _cached_daily_index("1001", 30)
     except KISError:
         pass
 
@@ -241,7 +288,7 @@ def market_regime(force: bool = False) -> dict[str, Any]:
 
 def _fetch_daily_only(code: str) -> list[dict[str, Any]]:
     try:
-        return daily_chart(code, days=200)
+        return _cached_daily(code)
     except KISError:
         return []
 
@@ -317,7 +364,7 @@ def pullback_swing(force: bool = False) -> dict[str, Any]:
         if not force and _SWING_CACHE["pullback"] and now - _SWING_CACHE["ts_pb"] < _CACHE_TTL:
             return _SWING_CACHE["pullback"]
 
-    rank = volume_rank("ALL")[:30]
+    rank = _cached_volume_rank("ALL")[:30]
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {s["code"]: ex.submit(_fetch_daily_only, s["code"]) for s in rank}
         datas = {code: f.result() for code, f in futures.items()}
@@ -328,7 +375,7 @@ def pullback_swing(force: bool = False) -> dict[str, Any]:
         row = _eval_pullback(s, daily)
         stocks.append(row)
 
-    stocks.sort(key=lambda r: (-r["pass_count"], -r["trade_value"]))
+    stocks.sort(key=lambda r: (-r["pass_count"], -r["trade_value"], r["code"]))
     result = {
         "stocks": stocks,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -402,7 +449,7 @@ def breakout_swing(force: bool = False) -> dict[str, Any]:
         if not force and _SWING_CACHE["breakout"] and now - _SWING_CACHE["ts_br"] < _CACHE_TTL:
             return _SWING_CACHE["breakout"]
 
-    rank = volume_rank("ALL")[:30]
+    rank = _cached_volume_rank("ALL")[:30]
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {s["code"]: ex.submit(_fetch_daily_only, s["code"]) for s in rank}
         datas = {code: f.result() for code, f in futures.items()}
@@ -413,7 +460,7 @@ def breakout_swing(force: bool = False) -> dict[str, Any]:
         row = _eval_breakout(s, daily)
         stocks.append(row)
 
-    stocks.sort(key=lambda r: (-r["pass_count"], -r["trade_value"]))
+    stocks.sort(key=lambda r: (-r["pass_count"], -r["trade_value"], r["code"]))
     result = {
         "stocks": stocks,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -423,3 +470,23 @@ def breakout_swing(force: bool = False) -> dict[str, Any]:
         _SWING_CACHE["breakout"] = result
         _SWING_CACHE["ts_br"] = now
     return result
+
+
+# ─────────────────────────── 캐시 워밍 ────────────────────────────
+
+def warm_cache() -> None:
+    """서버 기동 시 백그라운드로 호출. Top 30 종목의 daily_chart / investor 를
+    미리 끌어와 첫 스크리너 요청의 응답 시간을 단축한다. 모든 호출은 캐시 경유.
+    """
+    try:
+        rank = _cached_volume_rank("ALL")[:30]
+    except KISError:
+        return
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        for s in rank:
+            ex.submit(_fetch_daily_only, s["code"])
+            ex.submit(_cached_investor, s["code"])
+        ex.submit(_cached_index_price, "0001")
+        ex.submit(_cached_index_price, "1001")
+        ex.submit(_cached_daily_index, "0001", 30)
+        ex.submit(_cached_daily_index, "1001", 30)

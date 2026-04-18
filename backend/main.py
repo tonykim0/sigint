@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 
 from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,11 +27,15 @@ from schemas import (
     JournalStatsResponse,
     JournalUpdateRequest,
 )
+import screener
 from screener import breakout_swing, closing_bet, market_regime, pullback_swing
 import stock_db
 
 app = FastAPI(title="SIGINT API", version="0.3.0")
 
+# CORS: 운영 환경은 CORS_ORIGINS 환경변수로 정확히 열거한다.
+# 과거 Vercel 프리뷰 대응용 allow_origin_regex 는 CSRF 표면이 넓어 제거.
+# 프리뷰 URL 이 필요할 때는 해당 URL 을 CORS_ORIGINS 에 추가.
 _EXTRA_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 _ORIGINS = [
     "http://localhost:5173",
@@ -42,10 +47,28 @@ _ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ORIGINS,
-    allow_origin_regex=r"https://frontend-.*\.vercel\.app",
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _on_startup() -> None:
+    """서버 기동 시 스크리너 캐시를 백그라운드로 미리 채운다.
+
+    첫 스크리너 요청이 10 ~ 15초 걸리던 것을 즉시 응답으로 단축.
+    실패해도 서버 기동은 계속 진행되게 try/except.
+    """
+    if not os.getenv("KIS_APP_KEY"):
+        return
+
+    def _warm() -> None:
+        try:
+            screener.warm_cache()
+        except Exception:  # noqa: BLE001 — 캐시 워밍 실패는 치명적이지 않음
+            pass
+
+    threading.Thread(target=_warm, daemon=True, name="kis-cache-warm").start()
 
 _CODE_PATTERN = r"^\d{6}$"
 

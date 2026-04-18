@@ -253,8 +253,9 @@ export default function Journal() {
         ...f,
         entry_price: f.entry_price || p.price,
       }));
-    } catch {
-      // silent
+      setErr(null);
+    } catch (ex) {
+      setErr(`현재가 조회 실패: ${ex.message}`);
     }
   }
 
@@ -264,8 +265,18 @@ export default function Journal() {
       setErr('종목코드 6자리 입력');
       return;
     }
-    if (!form.entry_price) {
-      setErr('매수가 입력');
+    const entryPrice = Number(form.entry_price);
+    if (!entryPrice || entryPrice <= 0) {
+      setErr('매수가는 0보다 커야 합니다');
+      return;
+    }
+    if (entryPrice > 10_000_000) {
+      setErr('매수가는 1,000만원 이하만 허용됩니다');
+      return;
+    }
+    const weightPct = Number(form.weight_pct || 0);
+    if (weightPct < 0 || weightPct > 100) {
+      setErr('비중은 0~100 사이여야 합니다');
       return;
     }
     try {
@@ -273,9 +284,9 @@ export default function Journal() {
         code: form.code.trim(),
         name: form.name.trim(),
         entry_date: form.entry_date,
-        entry_price: Number(form.entry_price),
+        entry_price: entryPrice,
         reason: form.reason,
-        weight_pct: Number(form.weight_pct || 0),
+        weight_pct: weightPct,
         memo: form.memo,
       });
       setForm({
