@@ -113,7 +113,7 @@ def closing_bet(force: bool = False) -> dict[str, Any]:
         if not force and _CACHE["data"] and now - _CACHE["ts"] < _CACHE_TTL:
             return _CACHE["data"]
 
-    rank = volume_rank("ALL")[:50]
+    rank = volume_rank("ALL")[:30]
 
     with ThreadPoolExecutor(max_workers=3) as ex:
         kospi_f = ex.submit(index_price, "0001")
