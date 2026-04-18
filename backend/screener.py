@@ -475,17 +475,37 @@ def breakout_swing(force: bool = False) -> dict[str, Any]:
 # ─────────────────────────── 캐시 워밍 ────────────────────────────
 
 def warm_cache() -> None:
-    """서버 기동 시 백그라운드로 호출. Top 30 종목의 daily_chart / investor 를
-    미리 끌어와 첫 스크리너 요청의 응답 시간을 단축한다. 모든 호출은 캐시 경유.
+    """서버 기동 시 백그라운드로 호출. Top 60 종목의 주요 KIS 응답을 미리 끌어와
+    첫 스크리너/거래대금 요청의 응답 시간을 단축한다. 모든 호출은 캐시 경유.
+
+    워밍 대상:
+      - volume_rank (TOP 60)
+      - top 30: daily_chart + investor (스크리너용)
+      - top 60: inquire_price (거래대금 탭 업종 그룹핑용, 24h 캐시)
+      - KOSPI / KOSDAQ 현재가 + 일봉 (시황)
     """
     try:
-        rank = _cached_volume_rank("ALL")[:30]
+        rank60 = _cached_volume_rank("ALL")[:60]
     except KISError:
         return
+    rank30 = rank60[:30]
+
+    # inquire_price 는 warm-up 전용으로 24h TTL 로 캐싱 (업종명이 주 목적)
+    def _warm_price(code: str) -> None:
+        try:
+            cached_call(
+                inquire_price, code,
+                _ttl=86400.0, _fn_name="kis.inquire_price",
+            )
+        except KISError:
+            pass
+
     with ThreadPoolExecutor(max_workers=3) as ex:
-        for s in rank:
+        for s in rank30:
             ex.submit(_fetch_daily_only, s["code"])
             ex.submit(_cached_investor, s["code"])
+        for s in rank60:
+            ex.submit(_warm_price, s["code"])
         ex.submit(_cached_index_price, "0001")
         ex.submit(_cached_index_price, "1001")
         ex.submit(_cached_daily_index, "0001", 30)

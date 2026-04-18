@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import Body, FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 import analyzers
 import daily_store
 import journal
+from kis_cache import cached_call
 from kis_client import (
     KISError,
     aggregate_minute_bars,
@@ -143,6 +145,40 @@ def api_themes() -> dict:
         return {"themes": {}}
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+_SECTOR_TTL = 86400.0  # 24h — 업종은 거의 바뀌지 않음
+
+
+def _cached_sector(code: str) -> str:
+    """inquire_price 의 bstp_kor_isnm(업종) 만 필요한 경량 조회. 24h 캐시."""
+    try:
+        data = cached_call(
+            inquire_price, code,
+            _ttl=_SECTOR_TTL, _fn_name="kis.inquire_price",
+        )
+        return data.get("sector", "") or ""
+    except KISError:
+        return ""
+
+
+@app.post("/api/sectors")
+def api_sectors(codes: list[str] = Body(..., embed=True)) -> dict:
+    """다수 종목의 업종명을 한 번에 조회. 테마 그룹핑 fallback 용도.
+
+    프론트에서 거래대금 TOP N 받은 뒤 이 엔드포인트로 업종을 enrich 한다.
+    캐시가 warm 된 상태면 거의 즉시 응답 (in-memory cached_call).
+    """
+    cleaned = [c for c in codes if isinstance(c, str) and len(c) == 6 and c.isdigit()]
+    cleaned = cleaned[:80]  # 과도한 호출 방지
+    if not cleaned:
+        return {"sectors": {}}
+
+    result: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        for code, sector in zip(cleaned, ex.map(_cached_sector, cleaned)):
+            result[code] = sector
+    return {"sectors": result}
 
 
 @app.get("/api/volume-rank")

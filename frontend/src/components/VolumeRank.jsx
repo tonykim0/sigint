@@ -51,12 +51,33 @@ function buildCodeThemeMap(themes) {
   return map;
 }
 
+// KIS bstp_kor_isnm(업종명) → 고정 컬러. themes.json 에 없는 종목을 자동 분류할 때 사용.
+// 문자열 해시로 팔레트 회전시키므로 신규 업종도 일관된 색상이 붙는다.
+const SECTOR_PALETTE = [
+  '#60a5fa', '#a78bfa', '#34d399', '#fb923c', '#f472b6',
+  '#22d3ee', '#fbbf24', '#f87171', '#818cf8', '#4ade80',
+  '#c084fc', '#fb7185', '#38bdf8', '#facc15', '#a3e635',
+];
+
+function sectorColor(name) {
+  if (!name) return '#4b5563';
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return SECTOR_PALETTE[Math.abs(h) % SECTOR_PALETTE.length];
+}
+
+function resolveTheme(item, codeMap) {
+  const entry = codeMap[item.code];
+  if (entry) return { theme: entry.theme, color: entry.color, source: 'theme' };
+  const sector = (item.sector || '').trim();
+  if (sector) return { theme: sector, color: sectorColor(sector), source: 'sector' };
+  return { theme: '기타', color: '#4b5563', source: 'fallback' };
+}
+
 function buildGroups(items, codeMap) {
   const buckets = {}; // { theme: { color, items } }
   for (const item of items) {
-    const entry = codeMap[item.code];
-    const theme = entry?.theme || '기타';
-    const color = entry?.color || '#4b5563';
+    const { theme, color } = resolveTheme(item, codeMap);
     if (!buckets[theme]) buckets[theme] = { theme, color, items: [] };
     buckets[theme].items.push(item);
   }
@@ -106,6 +127,7 @@ export default function VolumeRank({ onSelectCode }) {
   const [market, setMarket] = useState('ALL');
   const [items, setItems] = useState([]);
   const [themes, setThemes] = useState({});
+  const [sectorMap, setSectorMap] = useState({}); // { code: 업종명 } — themes.json fallback
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [sort, setSort] = useState({ key: 'trade_value', dir: 'desc' });
@@ -119,6 +141,23 @@ export default function VolumeRank({ onSelectCode }) {
       .then((d) => setThemes(d.themes || {}))
       .catch(() => {});
   }, []);
+
+  // 신규 종목이 items 에 포함되면 백그라운드로 업종 fetch.
+  // sectorMap 은 누적만 되므로 캐시 히트율이 높다.
+  useEffect(() => {
+    if (!items.length) return;
+    const missing = items.map((r) => r.code).filter((c) => !(c in sectorMap));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    api
+      .sectors(missing)
+      .then((d) => {
+        if (cancelled) return;
+        setSectorMap((prev) => ({ ...prev, ...(d.sectors || {}) }));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [items, sectorMap]);
 
   const fetchItems = (mkt) => {
     setLoading(true);
@@ -161,24 +200,30 @@ export default function VolumeRank({ onSelectCode }) {
     return () => { cancelled = true; clearInterval(id); };
   }, [market, refreshSec]);
 
+  // items 에 sectorMap 을 주입한 enriched 배열.
+  const enrichedItems = useMemo(
+    () => items.map((r) => ({ ...r, sector: r.sector || sectorMap[r.code] || '' })),
+    [items, sectorMap],
+  );
+
   const codeMap = useMemo(() => buildCodeThemeMap(themes), [themes]);
 
   const sorted = useMemo(() => {
-    const arr = [...items];
+    const arr = [...enrichedItems];
     const { key, dir } = sort;
     arr.sort((a, b) => {
       const av = a[key];
       const bv = b[key];
       if (typeof av === 'string')
         return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      return dir === 'asc' ? av - bv : bv - av;
+      return dir === 'asc' ? (av || 0) - (bv || 0) : (bv || 0) - (av || 0);
     });
     return arr;
-  }, [items, sort]);
+  }, [enrichedItems, sort]);
 
   const groups = useMemo(
-    () => buildGroups(items, codeMap),
-    [items, codeMap],
+    () => buildGroups(enrichedItems, codeMap),
+    [enrichedItems, codeMap],
   );
 
   const total = useMemo(
@@ -286,28 +331,33 @@ export default function VolumeRank({ onSelectCode }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-fg-muted border-b border-border">
-                {COLS.map((c) => (
-                  <th
-                    key={c.key}
-                    className={`py-2 px-2 font-medium ${c.align} ${c.width || ''} cursor-pointer hover:text-fg-bright select-none`}
-                    onClick={() => toggleSort(c.key)}
-                  >
-                    {c.label}
-                    {sort.key === c.key && (
-                      <span className="ml-1 text-accent">
-                        {sort.dir === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </th>
-                ))}
+                {COLS.map((c) => {
+                  const active = sort.key === c.key;
+                  return (
+                    <th
+                      key={c.key}
+                      className={`py-2 px-2 font-medium ${c.align} ${c.width || ''} cursor-pointer select-none ${active ? 'text-accent' : 'hover:text-fg-bright'}`}
+                      onClick={() => toggleSort(c.key)}
+                    >
+                      {c.label}
+                      {active && (
+                        <span className="ml-1">
+                          {sort.dir === 'asc' ? '↑' : '↓'}
+                        </span>
+                      )}
+                    </th>
+                  );
+                })}
                 <th className="py-2 px-2 text-left font-medium text-fg-muted">
-                  테마
+                  테마/업종
                 </th>
               </tr>
             </thead>
             <tbody>
               {sorted.map((r, i) => {
-                const theme = codeMap[r.code];
+                const themeInfo = resolveTheme(r, codeMap);
+                const showTag = themeInfo.source !== 'fallback';
+                const isTVSort = sort.key === 'trade_value';
                 return (
                   <tr
                     key={r.code}
@@ -334,20 +384,21 @@ export default function VolumeRank({ onSelectCode }) {
                     <td className="py-2 px-2 text-right text-fg-muted">
                       {formatInt(r.volume)}
                     </td>
-                    <td className="py-2 px-2 text-right">
+                    <td className={`py-2 px-2 text-right ${isTVSort ? 'text-fg-white font-semibold' : ''}`}>
                       {formatKRWCompact(r.trade_value)}
                     </td>
                     <td className="py-2 px-2">
-                      {theme && (
+                      {showTag && (
                         <span
                           className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium"
                           style={{
-                            background: `${theme.color}20`,
-                            color: theme.color,
-                            border: `1px solid ${theme.color}50`,
+                            background: `${themeInfo.color}20`,
+                            color: themeInfo.color,
+                            border: `1px solid ${themeInfo.color}50`,
                           }}
+                          title={themeInfo.source === 'sector' ? '업종 (자동 분류)' : '테마 (수동 매핑)'}
                         >
-                          {theme.theme}
+                          {themeInfo.theme}
                         </span>
                       )}
                     </td>

@@ -51,6 +51,8 @@ export const api = {
   investorSummary: (topN = 10) => getJSON(`/api/investor-summary?top_n=${topN}`),
   search: (q) => getJSON(`/api/search?q=${encodeURIComponent(q)}`),
   themes: () => getJSON('/api/themes'),
+  sectors: (codes) =>
+    request('/api/sectors', { method: 'POST', body: { codes } }),
   screener: {
     closingBet: ({ force = false } = {}) =>
       getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`, {
