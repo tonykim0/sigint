@@ -150,8 +150,8 @@ export default function Overview({ onSelectCode }) {
   const [indexData, setIndexData] = useState(null);
   const [investorItems, setInvestorItems] = useState([]);
   const [themes, setThemes] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [indexLoading, setIndexLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [indexLoading, setIndexLoading] = useState(true);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
@@ -161,27 +161,30 @@ export default function Overview({ onSelectCode }) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setIndexLoading(true);
 
-    // 지수 병렬 조회
-    api.index()
-      .then((d) => { if (!cancelled) setIndexData(d); })
-      .catch(() => {})
-      .finally(() => !cancelled && setIndexLoading(false));
-
-    // 거래대금 TOP 30 + 외국인 요약
-    Promise.all([
-      api.volumeRank({ topN: 30 }),
-      api.investorSummary(10),
-    ])
-      .then(([rankData, invData]) => {
+    async function loadOverview() {
+      try {
+        const [indexResult, rankData, invData] = await Promise.all([
+          api.index(),
+          api.volumeRank({ topN: 30 }),
+          api.investorSummary(10),
+        ]);
         if (cancelled) return;
+        setIndexData(indexResult);
         setTop(rankData.items || []);
         setInvestorItems(invData.items || []);
-      })
-      .catch((e) => !cancelled && setErr(e.message))
-      .finally(() => !cancelled && setLoading(false));
+        setErr(null);
+      } catch (e) {
+        if (!cancelled) setErr(e.message);
+      } finally {
+        if (!cancelled) {
+          setIndexLoading(false);
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadOverview();
 
     return () => { cancelled = true; };
   }, []);

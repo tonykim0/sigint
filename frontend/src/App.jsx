@@ -62,7 +62,12 @@ export default function App() {
         {tab === 'overview' && <Overview onSelectCode={goToChart} />}
         {tab === 'volume' && <VolumeRank onSelectCode={goToChart} />}
         {tab === 'supply' && <SupplyDemand onSelectCode={goToChart} />}
-        {tab === 'chart' && <ChartAnalysis initialCode={selectedCode} />}
+        {tab === 'chart' && (
+          <ChartAnalysis
+            key={selectedCode || 'default-chart'}
+            initialCode={selectedCode}
+          />
+        )}
         {tab === 'screener' && <Screener onSelectCode={goToChart} onGoJournal={() => setTab('journal')} />}
         {tab === 'journal' && <Journal />}
       </main>

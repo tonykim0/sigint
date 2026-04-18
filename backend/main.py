@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import Body, FastAPI, HTTPException, Path, Query
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 import analyzers
@@ -17,6 +17,14 @@ from kis_client import (
     inquire_price,
     minute_chart,
     volume_rank,
+)
+from schemas import (
+    JournalCreateRequest,
+    JournalDeleteResponse,
+    JournalEntryResponse,
+    JournalListResponse,
+    JournalStatsResponse,
+    JournalUpdateRequest,
 )
 from screener import breakout_swing, closing_bet, market_regime, pullback_swing
 import stock_db
@@ -255,44 +263,43 @@ def api_reference_candle(
 
 
 # ---------------- 매매일지 ----------------
-@app.get("/api/journal")
-def api_journal_list() -> dict:
+@app.get("/api/journal", response_model=JournalListResponse)
+def api_journal_list() -> JournalListResponse:
     return {"items": journal.list_entries()}
 
 
-@app.post("/api/journal")
-def api_journal_add(payload: dict = Body(...)) -> dict:
-    required = {"code", "entry_date", "entry_price"}
-    if not required.issubset(payload):
-        raise HTTPException(
-            status_code=400,
-            detail=f"missing fields: {sorted(required - set(payload))}",
-        )
-    return journal.add_entry(payload)
+@app.post("/api/journal", response_model=JournalEntryResponse)
+def api_journal_add(payload: JournalCreateRequest) -> JournalEntryResponse:
+    return journal.add_entry(payload.model_dump(mode="json"))
 
 
-@app.put("/api/journal/{entry_id}")
-def api_journal_update(entry_id: str, payload: dict = Body(...)) -> dict:
-    entry = journal.update_entry(entry_id, payload)
+@app.put("/api/journal/{entry_id}", response_model=JournalEntryResponse)
+def api_journal_update(
+    entry_id: str, payload: JournalUpdateRequest
+) -> JournalEntryResponse:
+    patch = payload.model_dump(exclude_unset=True, mode="json")
+    if not patch:
+        raise HTTPException(status_code=400, detail="empty update payload")
+    entry = journal.update_entry(entry_id, patch)
     if entry is None:
         raise HTTPException(status_code=404, detail="entry not found")
     return entry
 
 
-@app.delete("/api/journal/{entry_id}")
-def api_journal_delete(entry_id: str) -> dict:
+@app.delete("/api/journal/{entry_id}", response_model=JournalDeleteResponse)
+def api_journal_delete(entry_id: str) -> JournalDeleteResponse:
     if not journal.delete_entry(entry_id):
         raise HTTPException(status_code=404, detail="entry not found")
     return {"deleted": entry_id}
 
 
-@app.get("/api/journal/stats")
-def api_journal_stats() -> dict:
+@app.get("/api/journal/stats", response_model=JournalStatsResponse)
+def api_journal_stats() -> JournalStatsResponse:
     return journal.stats()
 
 
-@app.get("/api/journal/{entry_id}/tracking")
-def api_journal_tracking(entry_id: str) -> dict:
+@app.get("/api/journal/{entry_id}/tracking", response_model=JournalEntryResponse)
+def api_journal_tracking(entry_id: str) -> JournalEntryResponse:
     try:
         entry = journal.refresh_tracking(entry_id)
     except KISError as exc:

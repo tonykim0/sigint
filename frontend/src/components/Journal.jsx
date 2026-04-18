@@ -165,7 +165,7 @@ function NotifyButton() {
 export default function Journal() {
   const [entries, setEntries] = useState([]);
   const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const prevAlertsRef = useRef(new Set());
   const [form, setForm] = useState({
@@ -197,7 +197,29 @@ export default function Journal() {
   };
 
   useEffect(() => {
-    reload();
+    let cancelled = false;
+
+    async function loadInitial() {
+      try {
+        const [list, s] = await Promise.all([
+          api.journal.list(),
+          api.journal.stats(),
+        ]);
+        if (cancelled) return;
+        setEntries(list.items || []);
+        setStats(s);
+        setErr(null);
+      } catch (e) {
+        if (!cancelled) setErr(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadInitial();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 손절/익절 알림 체크 (entries 바뀔 때마다)

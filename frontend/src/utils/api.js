@@ -35,26 +35,6 @@ export const api = {
   investorSummary: (topN = 10) => getJSON(`/api/investor-summary?top_n=${topN}`),
   search: (q) => getJSON(`/api/search?q=${encodeURIComponent(q)}`),
   themes: () => getJSON('/api/themes'),
-  journal: {
-    list: () => getJSON('/api/journal'),
-    add: (payload) =>
-      fetch(`${BASE}/api/journal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).then((r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t); })),
-    update: (id, patch) =>
-      fetch(`${BASE}/api/journal/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      }).then((r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t); })),
-    delete: (id) =>
-      fetch(`${BASE}/api/journal/${id}`, { method: 'DELETE' })
-        .then((r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t); })),
-    stats: () => getJSON('/api/journal/stats'),
-    tracking: (id) => getJSON(`/api/journal/${id}/tracking`),
-  },
   screener: {
     closingBet: ({ force = false } = {}) =>
       getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`),
@@ -73,17 +53,16 @@ export const api = {
   // keep legacy key for backwards compat
   closingBet: ({ force = false } = {}) =>
     getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`),
-
   journal: {
     list: () => getJSON('/api/journal'),
     stats: () => getJSON('/api/journal/stats'),
     add: (payload) => request('/api/journal', { method: 'POST', body: payload }),
     update: (id, payload) =>
       request(`/api/journal/${id}`, { method: 'PUT', body: payload }),
+    delete: (id) => request(`/api/journal/${id}`, { method: 'DELETE' }),
     remove: (id) => request(`/api/journal/${id}`, { method: 'DELETE' }),
     tracking: (id) => getJSON(`/api/journal/${id}/tracking`),
   },
-
   daily: {
     save: (market = 'ALL') =>
       request(`/api/daily-save?market=${market}`, { method: 'POST' }),

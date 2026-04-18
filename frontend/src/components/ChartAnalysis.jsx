@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -117,7 +117,13 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
 
     // 다바스 박스 price lines
     const { candle: candleSeries } = seriesRef.current;
-    priceLinesRef.current.forEach((pl) => { try { candleSeries.removePriceLine(pl); } catch (_) {} });
+    priceLinesRef.current.forEach((pl) => {
+      try {
+        candleSeries.removePriceLine(pl);
+      } catch {
+        // Ignore stale price line removal errors from the chart library.
+      }
+    });
     priceLinesRef.current = [];
     if (darvas?.box_top) {
       const pl = candleSeries.createPriceLine({ price: darvas.box_top, color: '#ef444490', lineWidth: 1, lineStyle: LineStyle.Dashed, title: 'Box Top' });
@@ -136,7 +142,11 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles }) {
       shape: 'arrowUp',
       text: '기준봉',
     }));
-    try { candleSeries.setMarkers(markers.sort((a, b) => a.time.localeCompare(b.time))); } catch (_) {}
+    try {
+      candleSeries.setMarkers(markers.sort((a, b) => a.time.localeCompare(b.time)));
+    } catch {
+      // Ignore marker update errors while the chart is tearing down.
+    }
 
     chartRef.current.timeScale().fitContent();
   }, [bars, ma5, ma20, ma60, darvas, refCandles]);
@@ -341,27 +351,32 @@ function SearchBox({ onSelect }) {
 }
 
 export default function ChartAnalysis({ initialCode }) {
-  const [input, setInput] = useState(initialCode || '005930');
-  const [code, setCode] = useState(initialCode || '005930');
+  const seedCode = initialCode || '005930';
+  const [input, setInput] = useState(seedCode);
+  const [code, setCode] = useState(seedCode);
   const [price, setPrice] = useState(null);
   const [chart, setChart] = useState(null);
   const [patterns, setPatterns] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
-  useEffect(() => {
-    if (initialCode) {
-      setInput(initialCode);
-      setCode(initialCode);
+  function submitCode(nextValue = input) {
+    const normalized = nextValue.replace(/\D/g, '').slice(0, 6);
+    setInput(normalized);
+    if (!/^\d{6}$/.test(normalized)) {
+      setErr('종목코드 6자리를 입력하세요.');
+      return;
     }
-  }, [initialCode]);
+    setLoading(true);
+    setErr(null);
+    setPatterns(null);
+    setCode(normalized);
+  }
 
   useEffect(() => {
     if (!/^\d{6}$/.test(code)) return;
     let cancelled = false;
-    setLoading(true);
-    setErr(null);
-    setPatterns(null);
+
     Promise.all([api.price(code), api.chart(code, { days: 120 })])
       .then(([p, c]) => {
         if (cancelled) return;
@@ -397,17 +412,17 @@ export default function ChartAnalysis({ initialCode }) {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            onKeyDown={(e) => e.key === 'Enter' && setCode(input)}
+            onKeyDown={(e) => e.key === 'Enter' && submitCode(input)}
             placeholder="코드 6자리"
             className="bg-bg-inner border border-border rounded-md px-3 py-2 text-sm text-fg-white w-32 focus:outline-none focus:border-accent tabular-nums"
           />
           <button
-            onClick={() => setCode(input)}
+            onClick={() => submitCode(input)}
             className="px-3 py-2 text-sm rounded-md bg-accent/15 border border-accent text-accent hover:bg-accent/25"
           >
             조회
           </button>
-          <SearchBox onSelect={(c, n) => { setInput(c); setCode(c); }} />
+          <SearchBox onSelect={(nextCode) => submitCode(nextCode)} />
           {loading && <span className="text-xs text-fg-muted">불러오는 중…</span>}
           {err && <span className="text-xs text-warn">{err}</span>}
           <div className="ml-auto text-right">

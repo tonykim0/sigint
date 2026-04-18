@@ -23,20 +23,17 @@ import Card from './Card.jsx';
 const UNIT = 1000;
 
 export default function SupplyDemand({ onSelectCode }) {
-  const [rank, setRank] = useState([]);
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setErr(null);
-    (async () => {
+
+    async function loadSupplyDemand() {
       try {
         const rk = await api.volumeRank({ topN: 10 });
         if (cancelled) return;
-        setRank(rk.items || []);
         // 10종목에 대해 투자자별 병렬 조회, 가장 최근일 하나만 사용
         const results = await Promise.all(
           (rk.items || []).map(async (r) => {
@@ -49,13 +46,18 @@ export default function SupplyDemand({ onSelectCode }) {
             }
           }),
         );
-        if (!cancelled) setRows(results);
+        if (!cancelled) {
+          setRows(results);
+          setErr(null);
+        }
       } catch (e) {
         if (!cancelled) setErr(e.message);
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    void loadSupplyDemand();
     return () => {
       cancelled = true;
     };
