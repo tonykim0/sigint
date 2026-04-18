@@ -105,6 +105,23 @@ def _refresh_rank() -> None:
         pass
 
 
+def get_name(code: str) -> str:
+    """code 로 종목명 반환. well-known + 최근 volume_rank 캐시에서 조회."""
+    if not code:
+        return ""
+    if code in _WK_MAP:
+        return _WK_MAP[code]["name"]
+    with _RANK_LOCK:
+        for r in _RANK_CACHE:
+            if r["code"] == code:
+                return r["name"]
+        stale = time.time() - _RANK_TS > _RANK_TTL
+    if stale:
+        import threading as _t
+        _t.Thread(target=_refresh_rank, daemon=True).start()
+    return ""
+
+
 def search(q: str, limit: int = 10) -> list[dict[str, str]]:
     q = q.strip()
     if not q:

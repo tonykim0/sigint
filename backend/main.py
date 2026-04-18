@@ -138,9 +138,11 @@ def api_volume_rank(
 @app.get("/api/price/{code}")
 def api_price(code: str = Path(..., pattern=_CODE_PATTERN)) -> dict:
     try:
-        return inquire_price(code)
+        data = inquire_price(code)
     except KISError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    data["name"] = stock_db.get_name(code)
+    return data
 
 
 @app.get("/api/chart/{code}")

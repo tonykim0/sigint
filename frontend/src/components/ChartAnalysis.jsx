@@ -455,7 +455,7 @@ export default function ChartAnalysis({ initialCode }) {
   return (
     <div className="space-y-4">
       <Card>
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3 flex-wrap">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -470,32 +470,52 @@ export default function ChartAnalysis({ initialCode }) {
             조회
           </button>
           <SearchBox onSelect={(nextCode) => submitCode(nextCode)} />
-          {loading && <span className="text-xs text-fg-muted">불러오는 중…</span>}
-          {err && <span className="text-xs text-warn">{err}</span>}
+          {loading && <span className="text-xs text-fg-muted self-center">불러오는 중…</span>}
+          {err && <span className="text-xs text-warn self-center">{err}</span>}
           <div className="ml-auto text-right">
             {price && (
               <>
-                <div className="text-xs text-fg-muted">
-                  {code} · {price.market} · {price.sector}
+                <div className="flex items-baseline gap-2 justify-end">
+                  <span className="text-xl font-bold text-fg-white">{price.name || '—'}</span>
+                  <span className="text-xs text-fg-muted tabular-nums">{code}</span>
                 </div>
-                <div className="text-2xl font-bold text-fg-white">
+                <div className="text-[11px] text-fg-muted">
+                  {price.market}{price.sector ? ` · ${price.sector}` : ''}
+                </div>
+                <div className="mt-1 text-3xl font-bold text-fg-white tabular-nums">
                   {formatInt(price.price)}
-                  <span
-                    className={`ml-3 text-sm ${changeColor(price.change_rate)}`}
-                  >
-                    {formatChangeRate(price.change_rate)}{' '}
+                  <span className={`ml-3 text-sm ${changeColor(price.change_rate)}`}>
                     {price.prev_diff > 0 ? '▲' : price.prev_diff < 0 ? '▼' : ''}
-                    {formatInt(Math.abs(price.prev_diff))}
+                    {formatInt(Math.abs(price.prev_diff))}{' '}
+                    ({formatChangeRate(price.change_rate)})
                   </span>
-                </div>
-                <div className="text-xs text-fg-muted">
-                  시총 {formatKRWCompact(price.market_cap * 1_0000_0000)} · PER{' '}
-                  {price.per} · 외인 {price.foreign_ratio}%
                 </div>
               </>
             )}
           </div>
         </div>
+
+        {price && (
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
+            {[
+              { label: '시가', value: formatInt(price.open) },
+              { label: '고가', value: formatInt(price.high), color: 'text-up' },
+              { label: '저가', value: formatInt(price.low), color: 'text-down' },
+              { label: '전일종가', value: formatInt(price.prev_close) },
+              { label: '거래량', value: formatInt(price.volume) },
+              { label: '거래대금', value: formatKRWCompact(price.trade_value) },
+              { label: '시총', value: formatKRWCompact(price.market_cap * 1_0000_0000) },
+              { label: 'PER', value: price.per ? price.per.toFixed(2) : '—' },
+              { label: 'PBR', value: price.pbr ? price.pbr.toFixed(2) : '—' },
+              { label: '외인비율', value: price.foreign_ratio ? `${price.foreign_ratio.toFixed(2)}%` : '—' },
+            ].map((f) => (
+              <div key={f.label} className="bg-bg-inner rounded-md px-2 py-1.5">
+                <div className="text-[10px] text-fg-muted">{f.label}</div>
+                <div className={`text-sm font-semibold tabular-nums ${f.color || 'text-fg-white'}`}>{f.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <Card
