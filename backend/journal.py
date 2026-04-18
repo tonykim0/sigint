@@ -15,7 +15,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from kis_client import KISError, daily_chart
 
@@ -23,6 +23,11 @@ DATA_FILE = Path(__file__).parent / "data" / "journal.json"
 _LOCK = threading.Lock()
 
 VALID_REASONS = {"closing_bet", "breakout", "pullback"}
+
+
+def _normalize_reason(value: Any) -> str:
+    reason = str(value or "closing_bet")
+    return reason if reason in VALID_REASONS else "closing_bet"
 
 
 def _read_all() -> list[dict[str, Any]]:
@@ -49,7 +54,7 @@ def list_entries() -> list[dict[str, Any]]:
         return _read_all()
 
 
-def get_entry(entry_id: str) -> dict[str, Any] | None:
+def get_entry(entry_id: str) -> Optional[dict[str, Any]]:
     with _LOCK:
         for e in _read_all():
             if e["id"] == entry_id:
@@ -65,7 +70,7 @@ def add_entry(payload: dict[str, Any]) -> dict[str, Any]:
         "name": payload.get("name", ""),
         "entry_date": payload["entry_date"],
         "entry_price": float(payload["entry_price"]),
-        "reason": payload.get("reason", "closing_bet"),
+        "reason": _normalize_reason(payload.get("reason")),
         "weight_pct": float(payload.get("weight_pct", 0) or 0),
         "memo": payload.get("memo", ""),
         "exit_date": payload.get("exit_date"),
@@ -77,8 +82,6 @@ def add_entry(payload: dict[str, Any]) -> dict[str, Any]:
         "tracking": {"d1": None, "d3": None, "d5": None, "d10": None},
         "category": None,
     }
-    if entry["reason"] not in VALID_REASONS:
-        entry["reason"] = "closing_bet"
     with _LOCK:
         entries = _read_all()
         entries.append(entry)
@@ -92,9 +95,11 @@ def update_entry(entry_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         for e in entries:
             if e["id"] != entry_id:
                 continue
-            for k in ("name", "memo", "reason", "exit_date"):
+            for k in ("name", "memo", "exit_date"):
                 if k in patch:
                     e[k] = patch[k]
+            if "reason" in patch:
+                e["reason"] = _normalize_reason(patch["reason"])
             if "weight_pct" in patch and patch["weight_pct"] is not None:
                 e["weight_pct"] = float(patch["weight_pct"])
             if "entry_price" in patch and patch["entry_price"] is not None:
@@ -133,7 +138,7 @@ def _classify(entry_price: float, t: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def refresh_tracking(entry_id: str) -> dict[str, Any] | None:
+def refresh_tracking(entry_id: str) -> Optional[dict[str, Any]]:
     """entry_date 이후 N거래일차 종가를 daily_chart 에서 채움."""
     entry = get_entry(entry_id)
     if entry is None:
@@ -146,7 +151,7 @@ def refresh_tracking(entry_id: str) -> dict[str, Any] | None:
     after = [b for b in bars if b.get("date", "") > entry["entry_date"]]
     after.sort(key=lambda b: b["date"])
 
-    def pick(n: int) -> float | None:
+    def pick(n: int) -> Optional[float]:
         return after[n - 1]["close"] if len(after) >= n else None
 
     tracking = {
