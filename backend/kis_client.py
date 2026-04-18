@@ -151,41 +151,53 @@ def _get(path: str, tr_id: str, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def volume_rank(market: str = "ALL") -> list[dict[str, Any]]:
-    """거래량 순위 조회.
+    """거래대금 순위 조회 (KIS volume-rank TR은 30개 상한이라
+    보통주/우선주 나눠서 호출 후 거래대금 순으로 합친 뒤 중복 제거).
 
     market: "ALL" | "KOSPI" | "KOSDAQ"
-    FID_BLNG_CLS_CODE = 0 평균거래량, 1 거래증가율, 2 평균거래회전율, 3 거래금액순, 4 평균거래금액회전율
-    CLAUDE.md 가 FID_BLNG_CLS_CODE="0" (평균거래량)로 명시했으므로 따른다.
+    FID_BLNG_CLS_CODE = 0 평균거래량, 1 거래증가율, 2 평균거래회전율,
+                         3 거래금액순, 4 평균거래금액회전율
     """
     market_code = {"ALL": "0000", "KOSPI": "0001", "KOSDAQ": "1001"}.get(
         market.upper(), "0000"
     )
-    params = {
-        "FID_COND_MRKT_DIV_CODE": "J",
-        "FID_COND_SCR_DIV_CODE": "20171",
-        "FID_INPUT_ISCD": market_code,
-        "FID_DIV_CLS_CODE": "0",
-        "FID_BLNG_CLS_CODE": "0",
-        "FID_TRGT_CLS_CODE": "111111111",
-        "FID_TRGT_EXLS_CLS_CODE": "000000",
-        "FID_INPUT_PRICE_1": "",
-        "FID_INPUT_PRICE_2": "",
-        "FID_VOL_CNT": "",
-        "FID_INPUT_DATE_1": "",
-    }
-    data = _get(
-        "/uapi/domestic-stock/v1/quotations/volume-rank",
-        tr_id="FHPST01710000",
-        params=params,
-    )
-    rows = data.get("output", []) or []
-    result = []
+
+    def _fetch(div_cls: str) -> list[dict[str, Any]]:
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_COND_SCR_DIV_CODE": "20171",
+            "FID_INPUT_ISCD": market_code,
+            "FID_DIV_CLS_CODE": div_cls,  # 0 전체 / 1 보통주 / 2 우선주
+            "FID_BLNG_CLS_CODE": "3",     # 거래금액순
+            "FID_TRGT_CLS_CODE": "111111111",
+            "FID_TRGT_EXLS_CLS_CODE": "000000",
+            "FID_INPUT_PRICE_1": "",
+            "FID_INPUT_PRICE_2": "",
+            "FID_VOL_CNT": "",
+            "FID_INPUT_DATE_1": "",
+        }
+        data = _get(
+            "/uapi/domestic-stock/v1/quotations/volume-rank",
+            tr_id="FHPST01710000",
+            params=params,
+        )
+        return data.get("output", []) or []
+
+    # 보통주(1) + 우선주(2) 병합 → 30 + 30 = 최대 60개
+    rows = _fetch("1") + _fetch("2")
+
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
     for r in rows:
+        code = r.get("mksc_shrn_iscd", "")
+        if not code or code in seen:
+            continue
+        seen.add(code)
         try:
             result.append(
                 {
                     "rank": int(r.get("data_rank") or 0),
-                    "code": r.get("mksc_shrn_iscd", ""),
+                    "code": code,
                     "name": r.get("hts_kor_isnm", ""),
                     "price": int(r.get("stck_prpr") or 0),
                     "change_rate": float(r.get("prdy_ctrt") or 0),
@@ -195,6 +207,11 @@ def volume_rank(market: str = "ALL") -> list[dict[str, Any]]:
             )
         except (TypeError, ValueError):
             continue
+
+    # 거래대금 내림차순 재정렬 + 순위 재부여
+    result.sort(key=lambda x: -x["trade_value"])
+    for i, r in enumerate(result, start=1):
+        r["rank"] = i
     return result
 
 
