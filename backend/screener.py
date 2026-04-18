@@ -26,6 +26,7 @@ from kis_client import (
     KISError,
     aggregate_minute_bars,
     daily_chart,
+    daily_index_chart,
     index_price,
     inquire_investor,
     minute_chart,
@@ -183,16 +184,26 @@ def market_regime(force: bool = False) -> dict[str, Any]:
         if not force and _REGIME_CACHE["data"] and now - _REGIME_CACHE["ts"] < _CACHE_TTL:
             return _REGIME_CACHE["data"]
 
+    kospi = {}
+    kosdaq = {}
+    kospi_bars: list[dict[str, Any]] = []
+    kosdaq_bars: list[dict[str, Any]] = []
     try:
         kospi = index_price("0001")
-        kospi_bars = daily_chart("U001", days=30)  # 코스피 지수 일봉
     except KISError:
-        kospi_bars = []
+        pass
+    try:
+        kospi_bars = daily_index_chart("0001", days=30)
+    except KISError:
+        pass
     try:
         kosdaq = index_price("1001")
-        kosdaq_bars = daily_chart("U201", days=30)
     except KISError:
-        kosdaq_bars = []
+        pass
+    try:
+        kosdaq_bars = daily_index_chart("1001", days=30)
+    except KISError:
+        pass
 
     def _regime_check(bars: list[dict[str, Any]], idx_price: dict[str, Any]) -> dict[str, Any]:
         if len(bars) < 20:
@@ -208,8 +219,8 @@ def market_regime(force: bool = False) -> dict[str, Any]:
             "above_ma20": bool(price > ma20) if (price and ma20) else None,
         }
 
-    kospi_regime = _regime_check(kospi_bars, kospi if 'kospi' in dir() else {})
-    kosdaq_regime = _regime_check(kosdaq_bars, kosdaq if 'kosdaq' in dir() else {})
+    kospi_regime = _regime_check(kospi_bars, kospi)
+    kosdaq_regime = _regime_check(kosdaq_bars, kosdaq)
 
     system_on = bool(
         kospi_regime.get("above_ma20") or kosdaq_regime.get("above_ma20")

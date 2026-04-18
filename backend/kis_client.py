@@ -239,6 +239,50 @@ def index_price(index_code: str) -> dict[str, Any]:
     }
 
 
+def daily_index_chart(index_code: str, days: int = 30) -> list[dict[str, Any]]:
+    """업종/지수 일봉 (FID_COND_MRKT_DIV_CODE='U').
+
+    index_code: '0001' KOSPI, '1001' KOSDAQ, '2001' KOSPI200
+    """
+    end = datetime.now()
+    start = end - timedelta(days=days * 2 + 10)
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "U",
+        "FID_INPUT_ISCD": index_code,
+        "FID_INPUT_DATE_1": start.strftime("%Y%m%d"),
+        "FID_INPUT_DATE_2": end.strftime("%Y%m%d"),
+        "FID_PERIOD_DIV_CODE": "D",
+    }
+    data = _get(
+        "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice",
+        tr_id="FHKUP03500100",
+        params=params,
+    )
+    rows = data.get("output2", []) or []
+    bars: list[dict[str, Any]] = []
+    for r in rows:
+        d = r.get("stck_bsop_date") or ""
+        if not d or len(d) != 8:
+            continue
+        try:
+            bars.append(
+                {
+                    "date": f"{d[:4]}-{d[4:6]}-{d[6:8]}",
+                    "open": float(r.get("bstp_nmix_oprc") or 0),
+                    "high": float(r.get("bstp_nmix_hgpr") or 0),
+                    "low": float(r.get("bstp_nmix_lwpr") or 0),
+                    "close": float(r.get("bstp_nmix_prpr") or 0),
+                    "volume": int(r.get("acml_vol") or 0),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    bars.sort(key=lambda b: b["date"])
+    if len(bars) > days:
+        bars = bars[-days:]
+    return bars
+
+
 def inquire_price(code: str) -> dict[str, Any]:
     """현재가 조회."""
     params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
