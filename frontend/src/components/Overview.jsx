@@ -297,6 +297,12 @@ export default function Overview({ onSelectCode }) {
 
   return (
     <div className="space-y-4">
+      {err && (
+        <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+          {err}
+        </div>
+      )}
+
       {/* 지수 + 현물 수급 + 30일 히스토리 통합 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <MarketSummaryCard

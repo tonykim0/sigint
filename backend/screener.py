@@ -54,15 +54,19 @@ def _is_preferred(name: str) -> bool:
     return "2우B" in name
 
 
-def _filtered_top60() -> list[dict[str, Any]]:
-    """거래대금 탭과 동일한 필터: ETF/우선주/100억미만 제외 후 상위 60개."""
+def _filtered_top(limit: int = 60) -> list[dict[str, Any]]:
+    """거래대금 탭과 동일한 필터: ETF/우선주/100억미만 제외 후 상위 N개."""
     rank = volume_rank("ALL")
     return [
         r for r in rank
         if not _is_etf(r["name"])
         and not _is_preferred(r["name"])
         and r.get("trade_value", 0) >= 10_000_000_000
-    ][:60]
+    ][:limit]
+
+
+def _filtered_top60() -> list[dict[str, Any]]:
+    return _filtered_top(60)
 
 _CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 _SWING_CACHE: dict[str, Any] = {"pullback": None, "breakout": None, "ts_pb": 0.0, "ts_br": 0.0}
@@ -145,9 +149,11 @@ def closing_bet(force: bool = False) -> dict[str, Any]:
         if not force and _CACHE["data"] and now - _CACHE["ts"] < _CACHE_TTL:
             return _CACHE["data"]
 
-    rank = _filtered_top60()
+    # 종가배팅은 종목당 3 API call (investor + daily + minute)로 무거움 →
+    # 필터 상위 30종목만 평가 (pullback/breakout 은 60)
+    rank = _filtered_top(30)
 
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         kospi_f = ex.submit(index_price, "0001")
         kosdaq_f = ex.submit(index_price, "1001")
         data_futures = {

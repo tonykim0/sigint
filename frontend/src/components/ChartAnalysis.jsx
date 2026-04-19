@@ -163,7 +163,7 @@ function CandleChart({ bars, ma5, ma20, ma60, darvas, refCandles, isIntraday }) 
     }
 
     chartRef.current.timeScale().fitContent();
-  }, [bars, ma5, ma20, ma60, darvas, refCandles]);
+  }, [bars, ma5, ma20, ma60, darvas, refCandles, isIntraday]);
 
   return <div ref={containerRef} className="w-full h-[420px]" />;
 }
@@ -397,15 +397,22 @@ export default function ChartAnalysis({ initialCode }) {
     }
     setLoading(true);
     setErr(null);
+    setMinuteBars(null);
     setPatterns(null);
     setCode(normalized);
     setRequestKey((key) => key + 1);
   }
 
+  function selectTimeframe(nextTimeframe) {
+    setTimeframe(nextTimeframe);
+    if (nextTimeframe !== 'D') {
+      setMinuteBars(null);
+    }
+  }
+
   useEffect(() => {
     if (!/^\d{6}$/.test(code)) return;
     let cancelled = false;
-    setLoading(true);
 
     Promise.all([api.price(code), api.chart(code, { days: 120 })])
       .then(([p, c]) => {
@@ -434,10 +441,7 @@ export default function ChartAnalysis({ initialCode }) {
 
   // 분봉 데이터 로드 (timeframe 변경 시)
   useEffect(() => {
-    if (!/^\d{6}$/.test(code) || !isIntraday) {
-      setMinuteBars(null);
-      return;
-    }
+    if (!/^\d{6}$/.test(code) || !isIntraday) return;
     let cancelled = false;
     api.minuteChart(code, { timeUnit: parseInt(timeframe, 10) })
       .then((d) => { if (!cancelled) setMinuteBars(d.bars || []); })
@@ -525,7 +529,7 @@ export default function ChartAnalysis({ initialCode }) {
             {TIMEFRAMES.map((t) => (
               <button
                 key={t.id}
-                onClick={() => setTimeframe(t.id)}
+                onClick={() => selectTimeframe(t.id)}
                 className={`px-2.5 py-1 text-xs transition-colors ${
                   timeframe === t.id
                     ? 'bg-accent/15 text-accent font-semibold'
