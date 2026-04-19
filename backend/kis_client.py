@@ -348,7 +348,24 @@ def inquire_price(code: str) -> dict[str, Any]:
     }
 
 
-def daily_chart(code: str, days: int = 90) -> list[dict[str, Any]]:
+_DC_CACHE: dict[str, Any] = {}
+_DC_TTL = 120.0  # 2분
+
+
+def daily_chart(code: str, days: int = 90, force: bool = False) -> list[dict[str, Any]]:
+    """일봉 조회 + 캐시. 동일 code 에 대해 큰 days 결과를 캐시로 두고
+    작은 days 요청은 slice 해서 즉시 반환."""
+    import time as _time
+    now = _time.time()
+    cached = _DC_CACHE.get(code)
+    if not force and cached and now - cached["ts"] < _DC_TTL and cached["days"] >= days:
+        return cached["bars"][-days:] if days < cached["days"] else cached["bars"]
+    bars = _daily_chart_uncached(code, days=days)
+    _DC_CACHE[code] = {"ts": now, "days": days, "bars": bars}
+    return bars
+
+
+def _daily_chart_uncached(code: str, days: int = 90) -> list[dict[str, Any]]:
     """일별 OHLCV. 날짜 오름차순 정렬."""
     end = datetime.now()
     start = end - timedelta(days=days * 2 + 10)  # 주말/휴일 여유

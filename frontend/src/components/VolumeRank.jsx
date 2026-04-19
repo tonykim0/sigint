@@ -338,18 +338,24 @@ export default function VolumeRank({ onSelectCode }) {
             <tbody>
               {sorted.map((r, i) => {
                 const theme = codeMap[r.code];
+                const dualBuy = (r.foreign_value || 0) > 0 && (r.institution_value || 0) > 0;
                 return (
                   <tr
                     key={r.code}
-                    className="border-b border-border/60 hover:bg-bg-inner cursor-pointer"
+                    className={`border-b border-border/60 hover:bg-bg-inner cursor-pointer ${dualBuy ? 'bg-accent/5' : ''}`}
                     onClick={() => onSelectCode?.(r.code)}
                   >
                     <td className="py-2 px-2 text-right text-fg-muted">
                       {i + 1}
                     </td>
                     <td className="py-2 px-2">
-                      <div className="text-fg-white font-semibold">
-                        {r.name}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-fg-white font-semibold">{r.name}</span>
+                        {dualBuy && (
+                          <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-accent/20 text-accent border border-accent/50">
+                            양매수
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-fg-muted">{r.code}</div>
                     </td>

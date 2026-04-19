@@ -3,7 +3,6 @@ import Header from './components/Header.jsx';
 import TabNav from './components/TabNav.jsx';
 import Overview from './components/Overview.jsx';
 import VolumeRank from './components/VolumeRank.jsx';
-import SupplyDemand from './components/SupplyDemand.jsx';
 import ChartAnalysis from './components/ChartAnalysis.jsx';
 import Screener from './components/Screener.jsx';
 import Journal from './components/Journal.jsx';
@@ -12,7 +11,6 @@ import { api } from './utils/api.js';
 const TABS = [
   { id: 'overview', label: '종합' },
   { id: 'volume', label: '거래대금' },
-  { id: 'supply', label: '수급' },
   { id: 'chart', label: '차트분석' },
   { id: 'screener', label: '스크리너' },
   { id: 'journal', label: '매매일지' },
@@ -61,7 +59,6 @@ export default function App() {
       <main className="max-w-[1400px] mx-auto px-3 sm:px-6 py-4 sm:py-6">
         {tab === 'overview' && <Overview onSelectCode={goToChart} />}
         {tab === 'volume' && <VolumeRank onSelectCode={goToChart} />}
-        {tab === 'supply' && <SupplyDemand onSelectCode={goToChart} />}
         {tab === 'chart' && (
           <ChartAnalysis
             key={selectedCode || 'default-chart'}
