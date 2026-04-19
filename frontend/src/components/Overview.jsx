@@ -25,28 +25,101 @@ import {
 const MIN_TRADE_VALUE = 10_000_000_000; // 100억
 import Card from './Card.jsx';
 
-// ── 지수 카드 ────────────────────────────────────────────────────
-function IndexCard({ label, data, loading }) {
-  if (loading || !data)
-    return (
-      <div className="bg-bg-card border border-border rounded-xl p-[18px]">
-        <div className="text-xs text-fg-muted mb-1">{label}</div>
-        <div className="text-fg-muted text-sm">{loading ? '조회 중…' : '—'}</div>
-      </div>
-    );
+// KIS 투자자 값: 백만원 → 원
+const KIS_UNIT_ = 1_000_000;
+
+// ── 지수 + 현물 수급 + 30일 히스토리 통합 카드 ─────────────────────
+function MarketSummaryCard({ label, index, flow, indexLoading, flowLoading }) {
+  const parts = flow ? [
+    { key: 'foreign', label: '외인', value: (flow.foreign || 0) * KIS_UNIT_ },
+    { key: 'institution', label: '기관', value: (flow.institution || 0) * KIS_UNIT_ },
+    { key: 'individual', label: '개인', value: (flow.individual || 0) * KIS_UNIT_ },
+  ] : null;
+
+  // 30일 히스토리 데이터 (백만원 → 억원)
+  const historyData = useMemo(() => {
+    const UK_MN = 100;
+    return (flow?.history || []).map((r) => ({
+      date: r.date?.slice(5) || '',
+      외인: +(r.foreign / UK_MN).toFixed(0),
+      기관: +(r.institution / UK_MN).toFixed(0),
+      개인: +(r.individual / UK_MN).toFixed(0),
+    }));
+  }, [flow]);
+
   return (
     <div className="bg-bg-card border border-border rounded-xl p-[18px]">
-      <div className="text-xs text-fg-muted mb-1">{label}</div>
-      <div className="text-xl font-bold text-fg-white tabular-nums">
-        {formatInt(data.price)}
+      {/* 지수 */}
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="text-sm font-bold text-fg-white">{label}</div>
+        {indexLoading ? (
+          <span className="text-xs text-fg-muted">조회 중…</span>
+        ) : index ? (
+          <div className="text-right">
+            <span className="text-2xl font-bold text-fg-white tabular-nums">
+              {formatInt(index.price)}
+            </span>
+            <span className={`ml-2 text-sm font-semibold ${changeColor(index.change_rate)}`}>
+              {index.prev_diff > 0 ? '▲' : index.prev_diff < 0 ? '▼' : ''}
+              {index.prev_diff !== 0 && formatInt(Math.abs(index.prev_diff))}{' '}
+              ({formatChangeRate(index.change_rate)})
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs text-fg-muted">—</span>
+        )}
       </div>
-      <div className={`text-sm font-semibold ${changeColor(data.change_rate)}`}>
-        {formatChangeRate(data.change_rate)}
-        {data.prev_diff != null && (
-          <span className="ml-1 text-xs">
-            {data.prev_diff > 0 ? '▲' : data.prev_diff < 0 ? '▼' : ''}
-            {data.prev_diff !== 0 && formatInt(Math.abs(data.prev_diff))}
-          </span>
+
+      {/* 현물 수급 (TOP 10 합산) */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[11px] text-fg-muted font-semibold">현물 수급</span>
+          <span className="text-[10px] text-fg-muted">TOP 10 합산 · 단위 원</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {parts ? parts.map((p) => {
+            const isPos = p.value >= 0;
+            return (
+              <div key={p.key} className="bg-bg-inner rounded-md px-2 py-1.5 text-center">
+                <div className="text-[10px] text-fg-muted">{p.label}</div>
+                <div className={`text-sm font-bold tabular-nums ${isPos ? 'text-up' : 'text-down'}`}>
+                  {isPos ? '+' : ''}{formatKRWCompact(p.value)}
+                </div>
+              </div>
+            );
+          }) : (
+            <div className="col-span-3 text-xs text-fg-muted text-center py-2">
+              {flowLoading ? '조회 중…' : '—'}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 30일 히스토리 */}
+      <div>
+        <div className="text-[11px] text-fg-muted font-semibold mb-1">최근 30일 수급 (억원)</div>
+        {historyData.length >= 2 ? (
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={historyData} margin={{ top: 4, right: 4, bottom: 0, left: -10 }} stackOffset="sign">
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e2228" vertical={false} />
+              <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 9 }} interval={4} />
+              <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} width={50} />
+              <Tooltip
+                contentStyle={{ background: '#0d0f13', border: '1px solid #1e2228', borderRadius: 8, fontSize: 11 }}
+                labelStyle={{ color: '#e5e7eb' }}
+                formatter={(v, name) => [`${v > 0 ? '+' : ''}${v}억`, name]}
+              />
+              <Legend wrapperStyle={{ fontSize: 10, paddingTop: 4 }} iconType="rect" iconSize={8} />
+              <ReferenceLine y={0} stroke="#4b5563" />
+              <Bar dataKey="외인" fill="#3b82f6" />
+              <Bar dataKey="기관" fill="#a78bfa" />
+              <Bar dataKey="개인" fill="#fb923c" />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-[180px] flex items-center justify-center text-xs text-fg-muted">
+            {flowLoading ? '조회 중…' : '데이터 없음'}
+          </div>
         )}
       </div>
     </div>
@@ -77,101 +150,6 @@ function buildThemesFromAPI(rankItems, codeThemeMap) {
     if (b.theme === '기타') return -1;
     return b.value - a.value;
   });
-}
-
-// KIS 투자자 금액(frgn_ntby_tr_pbmn 등)은 백만원 단위
-const KIS_UNIT = 1_000_000;
-
-// ── 시장 수급 (개인/기관/외인) ──────────────────────────────────
-function MarketFlowCard({ label, flow, loading }) {
-  if (loading || !flow) {
-    return (
-      <div className="bg-bg-card border border-border rounded-xl p-[18px]">
-        <div className="text-xs text-fg-muted mb-2 font-semibold">{label} · 현물 수급</div>
-        <div className="text-fg-muted text-sm">{loading ? '조회 중…' : '—'}</div>
-      </div>
-    );
-  }
-  const parts = [
-    { key: 'foreign', label: '외인', value: (flow.foreign || 0) * KIS_UNIT },
-    { key: 'institution', label: '기관', value: (flow.institution || 0) * KIS_UNIT },
-    { key: 'individual', label: '개인', value: (flow.individual || 0) * KIS_UNIT },
-  ];
-
-  return (
-    <div className="bg-bg-card border border-border rounded-xl p-[18px]">
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="text-sm font-bold text-fg-white">{label} <span className="text-[10px] text-fg-muted font-normal">· 현물 순매수</span></div>
-        <div className="text-[10px] text-fg-muted">TOP {flow.count || 10} 합산 · 단위 원</div>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {parts.map((p) => {
-          const isPos = p.value >= 0;
-          const colorCls = isPos ? 'text-up' : 'text-down';
-          return (
-            <div key={p.key} className="bg-bg-inner rounded-md px-3 py-2 text-center">
-              <div className="text-[11px] text-fg-muted">{p.label}</div>
-              <div className={`text-lg font-bold tabular-nums ${colorCls}`}>
-                {isPos ? '+' : ''}{formatKRWCompact(p.value)}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── 30일 수급 히스토리 차트 ───────────────────────────────────────
-function FlowHistoryChart({ label, history, loading }) {
-  // history: [{date, foreign, institution, individual}] — KIS 값은 백만원 단위
-  // 1억원 = 100 백만원
-  const data = useMemo(() => {
-    const UK_MN = 100;
-    return (history || []).map((r) => ({
-      date: r.date?.slice(5) || '',   // "MM-DD"
-      외인: +(r.foreign / UK_MN).toFixed(0),
-      기관: +(r.institution / UK_MN).toFixed(0),
-      개인: +(r.individual / UK_MN).toFixed(0),
-    }));
-  }, [history]);
-
-  if (loading) {
-    return (
-      <Card title={`${label} · 최근 30일 수급`} subtitle="현물 근사치">
-        <div className="h-48 flex items-center justify-center text-fg-muted text-sm">조회 중…</div>
-      </Card>
-    );
-  }
-  if (!data.length) {
-    return (
-      <Card title={`${label} · 최근 30일 수급`} subtitle="현물 근사치">
-        <div className="h-48 flex items-center justify-center text-fg-muted text-sm">데이터 없음</div>
-      </Card>
-    );
-  }
-
-  return (
-    <Card title={`${label} · 최근 30일 수급`} subtitle="단위: 억원">
-      <ResponsiveContainer width="100%" height={220}>
-        <BarChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e2228" />
-          <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 10 }} interval={3} />
-          <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} />
-          <Tooltip
-            contentStyle={{ background: '#0d0f13', border: '1px solid #1e2228', borderRadius: 8, fontSize: 12 }}
-            labelStyle={{ color: '#e5e7eb' }}
-            formatter={(v) => [`${v > 0 ? '+' : ''}${v}억`, '']}
-          />
-          <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-          <ReferenceLine y={0} stroke="#4b5563" />
-          <Bar dataKey="외인" fill="#3b82f6" stackId="flow" />
-          <Bar dataKey="기관" fill="#a78bfa" stackId="flow" />
-          <Bar dataKey="개인" fill="#fb923c" stackId="flow" />
-        </BarChart>
-      </ResponsiveContainer>
-    </Card>
-  );
 }
 
 // ── 투자자별 순매수 TOP 10 ──────────────────────────────────────
@@ -308,22 +286,22 @@ export default function Overview({ onSelectCode }) {
 
   return (
     <div className="space-y-4">
-      {/* 지수 카드 */}
-      <div className="grid grid-cols-2 gap-3">
-        <IndexCard label="KOSPI" data={indexData?.kospi} loading={indexLoading} />
-        <IndexCard label="KOSDAQ" data={indexData?.kosdaq} loading={indexLoading} />
-      </div>
-
-      {/* 시장 수급 (현물) 당일 */}
+      {/* 지수 + 현물 수급 + 30일 히스토리 통합 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <MarketFlowCard label="KOSPI" flow={flow?.kospi} loading={flowLoading} />
-        <MarketFlowCard label="KOSDAQ" flow={flow?.kosdaq} loading={flowLoading} />
-      </div>
-
-      {/* 최근 30일 수급 히스토리 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <FlowHistoryChart label="KOSPI" history={flow?.kospi?.history} loading={flowLoading} />
-        <FlowHistoryChart label="KOSDAQ" history={flow?.kosdaq?.history} loading={flowLoading} />
+        <MarketSummaryCard
+          label="KOSPI"
+          index={indexData?.kospi}
+          flow={flow?.kospi}
+          indexLoading={indexLoading}
+          flowLoading={flowLoading}
+        />
+        <MarketSummaryCard
+          label="KOSDAQ"
+          index={indexData?.kosdaq}
+          flow={flow?.kosdaq}
+          indexLoading={indexLoading}
+          flowLoading={flowLoading}
+        />
       </div>
 
       {/* 주도 테마 (상위 60종목, ETF/우선주/100억미만 제외, 섹터별 묶음) */}
