@@ -6,7 +6,11 @@ import {
   formatChangeRate,
   formatInt,
   formatKRWCompact,
+  isPreferred,
 } from '../utils/format.js';
+
+const MIN_TRADE_VALUE = 10_000_000_000; // 100억
+const INVESTOR_UNIT = 1_000_000; // KIS 투자자 금액: 백만원 → 원
 import Card from './Card.jsx';
 import InvestorTop10 from './InvestorTop10.jsx';
 
@@ -40,7 +44,20 @@ const COLS = [
   { key: 'change_rate', label: '등락률', align: 'text-right' },
   { key: 'volume', label: '거래량', align: 'text-right' },
   { key: 'trade_value', label: '거래대금', align: 'text-right' },
+  { key: 'foreign_value', label: '외인', align: 'text-right' },
+  { key: 'institution_value', label: '기관', align: 'text-right' },
+  { key: 'individual_value', label: '개인', align: 'text-right' },
 ];
+
+function InvestorCell({ value }) {
+  if (value == null) return <span className="text-fg-muted">—</span>;
+  const isPos = value > 0;
+  return (
+    <span className={`tabular-nums ${isPos ? 'text-up' : value < 0 ? 'text-down' : 'text-fg-muted'}`}>
+      {isPos ? '+' : ''}{formatKRWCompact(value)}
+    </span>
+  );
+}
 
 function buildCodeThemeMap(themes) {
   // { code: { theme, color } }
@@ -118,8 +135,8 @@ export default function VolumeRank({ onSelectCode }) {
 
   useEffect(() => {
     let cancelled = false;
-    api.investorSummary(30)
-      .then((d) => { if (!cancelled) setInvestorItems(excludeETF(d.items)); })
+    api.investorSummary(60)
+      .then((d) => { if (!cancelled) setInvestorItems(d.items || []); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -135,7 +152,7 @@ export default function VolumeRank({ onSelectCode }) {
     setLoading(true);
     setErr(null);
     return api
-      .volumeRank({ market: mkt, topN: 60 })
+      .volumeRank({ market: mkt, topN: 120 })
       .then((d) => {
         setItems(excludeETF(d.items));
         setLastUpdated(new Date());
@@ -149,7 +166,7 @@ export default function VolumeRank({ onSelectCode }) {
 
     async function refreshItems() {
       try {
-        const data = await api.volumeRank({ market, topN: 60 });
+        const data = await api.volumeRank({ market, topN: 120 });
         if (cancelled) return;
         setItems(excludeETF(data.items));
         setLastUpdated(new Date());
@@ -174,27 +191,53 @@ export default function VolumeRank({ onSelectCode }) {
 
   const codeMap = useMemo(() => buildCodeThemeMap(themes), [themes]);
 
+  // 투자자 데이터 map (code → {foreign, institution, individual})
+  const investorMap = useMemo(() => {
+    const m = {};
+    for (const r of investorItems) m[r.code] = r;
+    return m;
+  }, [investorItems]);
+
+  // ETF + 우선주 + 100억 미만 제외 → 상위 60개 + 투자자 머지
+  const filtered = useMemo(() => {
+    const arr = items
+      .filter((r) => !isPreferred(r.name) && (r.trade_value || 0) >= MIN_TRADE_VALUE)
+      .slice(0, 60)
+      .map((r) => {
+        const inv = investorMap[r.code];
+        return {
+          ...r,
+          foreign_value: inv ? (inv.foreign_value || 0) * INVESTOR_UNIT : null,
+          institution_value: inv ? (inv.institution_value || 0) * INVESTOR_UNIT : null,
+          individual_value: inv ? (inv.individual_value || 0) * INVESTOR_UNIT : null,
+        };
+      });
+    return arr;
+  }, [items, investorMap]);
+
   const sorted = useMemo(() => {
-    const arr = [...items];
+    const arr = [...filtered];
     const { key, dir } = sort;
     arr.sort((a, b) => {
       const av = a[key];
       const bv = b[key];
+      if (av == null) return 1;
+      if (bv == null) return -1;
       if (typeof av === 'string')
         return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
       return dir === 'asc' ? av - bv : bv - av;
     });
     return arr;
-  }, [items, sort]);
+  }, [filtered, sort]);
 
   const groups = useMemo(
-    () => buildGroups(items, codeMap),
-    [items, codeMap],
+    () => buildGroups(filtered, codeMap),
+    [filtered, codeMap],
   );
 
   const total = useMemo(
-    () => items.reduce((s, r) => s + (r.trade_value || 0), 0),
-    [items],
+    () => filtered.reduce((s, r) => s + (r.trade_value || 0), 0),
+    [filtered],
   );
 
   function toggleSort(key) {
@@ -349,6 +392,15 @@ export default function VolumeRank({ onSelectCode }) {
                     <td className="py-2 px-2 text-right">
                       {formatKRWCompact(r.trade_value)}
                     </td>
+                    <td className="py-2 px-2 text-right text-xs">
+                      <InvestorCell value={r.foreign_value} />
+                    </td>
+                    <td className="py-2 px-2 text-right text-xs">
+                      <InvestorCell value={r.institution_value} />
+                    </td>
+                    <td className="py-2 px-2 text-right text-xs">
+                      <InvestorCell value={r.individual_value} />
+                    </td>
                     <td className="py-2 px-2">
                       {theme && (
                         <span
@@ -369,7 +421,7 @@ export default function VolumeRank({ onSelectCode }) {
               {!loading && sorted.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={10}
                     className="py-8 text-center text-fg-muted"
                   >
                     데이터가 없습니다.

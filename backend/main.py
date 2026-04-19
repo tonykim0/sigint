@@ -82,10 +82,29 @@ def api_market_flow(force: bool = Query(False)) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+_INV_SUMMARY_CACHE: dict = {"ts": 0.0, "top_n": 0, "data": None}
+_INV_SUMMARY_TTL = 180.0
+
+
 @app.get("/api/investor-summary")
-def api_investor_summary(top_n: int = Query(10, ge=5, le=30)) -> dict:
-    """거래대금 상위 top_n 종목의 외국인/기관 순매수 요약."""
+def api_investor_summary(
+    top_n: int = Query(10, ge=5, le=60),
+    force: bool = Query(False),
+) -> dict:
+    """거래대금 상위 top_n 종목의 외국인/기관/개인 순매수 요약 (3분 캐시)."""
+    import time as _time
     from concurrent.futures import ThreadPoolExecutor
+
+    now = _time.time()
+    if (
+        not force
+        and _INV_SUMMARY_CACHE["data"]
+        and _INV_SUMMARY_CACHE["top_n"] >= top_n
+        and now - _INV_SUMMARY_CACHE["ts"] < _INV_SUMMARY_TTL
+    ):
+        items = _INV_SUMMARY_CACHE["data"][:top_n]
+        return {"items": items}
+
     try:
         rank = volume_rank("ALL")[:top_n]
     except KISError as exc:
@@ -102,6 +121,7 @@ def api_investor_summary(top_n: int = Query(10, ge=5, le=30)) -> dict:
             "name": s["name"],
             "price": s["price"],
             "change_rate": s["change_rate"],
+            "trade_value": s.get("trade_value", 0),
             "foreign_value": latest.get("foreign_value", 0),
             "institution_value": latest.get("institution_value", 0),
             "individual_value": latest.get("individual_value", 0),
@@ -110,7 +130,11 @@ def api_investor_summary(top_n: int = Query(10, ge=5, le=30)) -> dict:
     with ThreadPoolExecutor(max_workers=3) as ex:
         results = list(ex.map(fetch, rank))
 
-    results.sort(key=lambda r: r["foreign_value"], reverse=True)
+    results.sort(key=lambda r: -(r.get("trade_value") or 0))
+
+    _INV_SUMMARY_CACHE["ts"] = now
+    _INV_SUMMARY_CACHE["top_n"] = top_n
+    _INV_SUMMARY_CACHE["data"] = results
     return {"items": results}
 
 
