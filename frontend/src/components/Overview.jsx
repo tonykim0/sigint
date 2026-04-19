@@ -103,6 +103,7 @@ function buildThemesFromAPI(rankItems, codeThemeMap) {
     const entry = codeThemeMap[r.code];
     if (!entry) continue;
     const t = entry.theme;
+    if (t.startsWith('ETF')) continue; // ETF 테마는 제외
     if (!map[t]) map[t] = { theme: t, color: entry.color, count: 0, value: 0, leader: null };
     map[t].count += 1;
     map[t].value += r.trade_value || 0;
@@ -351,29 +352,37 @@ export default function Overview({ onSelectCode }) {
       </div>
 
       {/* 주도 테마 */}
-      <Card title="오늘의 주도 테마" subtitle="거래대금 기준 자동 추출">
+      <Card title="오늘의 주도 테마" subtitle="거래대금 기준 자동 추출 (ETF 제외)">
         {themeList.length === 0 ? (
           <div className="text-xs text-fg-muted">{loading ? '조회 중…' : '감지된 테마 없음'}</div>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-1.5">
             {themeList.map((t, i) => (
-              <div
+              <button
                 key={t.theme}
-                className="flex items-center gap-2 px-3 py-2 rounded-md bg-bg-inner border border-border"
-                style={{ borderColor: i === 0 ? `${t.color}60` : undefined }}
+                onClick={() => t.leader && onSelectCode?.(t.leader.code)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-md bg-bg-inner border border-border hover:border-accent/60 transition-colors text-left"
+                style={{ borderLeftWidth: 3, borderLeftColor: t.color }}
               >
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: t.color }} />
-                <div>
-                  <span className="text-sm text-fg-white font-semibold">{t.theme}</span>
-                  <span className="text-xs text-fg-muted ml-1">({t.count}종목)</span>
+                <span className="text-xs text-fg-muted tabular-nums w-5 shrink-0">#{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-sm text-fg-white font-semibold">{t.theme}</span>
+                    <span className="text-[11px] text-fg-muted">{t.count}종목</span>
+                  </div>
                   {t.leader && (
-                    <span className={`ml-2 text-xs ${changeColor(t.leader.change_rate)}`}>
-                      {t.leader.name} {formatChangeRate(t.leader.change_rate)}
-                    </span>
+                    <div className="text-[11px] text-fg-muted truncate">
+                      대장: <span className="text-fg-bright">{t.leader.name}</span>{' '}
+                      <span className={changeColor(t.leader.change_rate)}>
+                        {formatChangeRate(t.leader.change_rate)}
+                      </span>
+                    </div>
                   )}
-                  <div className="text-xs text-accent">{formatKRWCompact(t.value)}</div>
                 </div>
-              </div>
+                <span className="text-sm text-accent font-semibold tabular-nums shrink-0">
+                  {formatKRWCompact(t.value)}
+                </span>
+              </button>
             ))}
           </div>
         )}
