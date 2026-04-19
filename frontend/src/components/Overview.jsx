@@ -20,55 +20,6 @@ import {
 } from '../utils/format.js';
 import Card from './Card.jsx';
 
-// ── 타임테이블 ─────────────────────────────────────────────────────
-const TIMETABLE = [
-  { start: 540, end: 560, label: '수확/투매', color: 'bg-warn/20 text-warn border-warn/40', active: 'bg-warn/30 border-warn text-warn font-bold' },
-  { start: 560, end: 660, label: '프라임 타임', color: 'bg-accent/10 text-accent border-accent/30', active: 'bg-accent/25 border-accent text-accent font-bold' },
-  { start: 660, end: 870, label: '매매 금지', color: 'bg-down/10 text-down border-down/20', active: 'bg-down/25 border-down text-down font-bold' },
-  { start: 870, end: 920, label: '종가매매 준비', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30', active: 'bg-blue-500/25 border-blue-400 text-blue-300 font-bold' },
-  { start: 920, end: 1440, label: '데이터 정리', color: 'bg-inst/10 text-inst border-inst/20', active: 'bg-inst/25 border-inst text-inst font-bold' },
-];
-
-function formatMinutes(m) {
-  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-}
-
-function currentSlot(now = new Date()) {
-  const mins = now.getHours() * 60 + now.getMinutes();
-  return TIMETABLE.find((s) => mins >= s.start && mins < s.end) ?? null;
-}
-
-function TimetableBar() {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-  const active = currentSlot(now);
-  return (
-    <Card title="매매 타임테이블" subtitle={active ? `현재: ${active.label}` : '장외'}>
-      <div className="grid grid-cols-5 gap-2">
-        {TIMETABLE.map((s) => {
-          const isActive = active?.label === s.label;
-          return (
-            <div
-              key={s.label}
-              className={`p-2 sm:p-3 rounded-md border text-xs text-center transition-all ${
-                isActive ? s.active : `${s.color} opacity-60`
-              }`}
-            >
-              <div className="text-[10px] opacity-70 hidden sm:block">
-                {formatMinutes(s.start)}~{formatMinutes(s.end)}
-              </div>
-              <div className="mt-0.5">{s.label}</div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
 // ── 지수 카드 ────────────────────────────────────────────────────
 function IndexCard({ label, data, loading }) {
   if (loading || !data)
@@ -346,8 +297,6 @@ export default function Overview({ onSelectCode }) {
 
   return (
     <div className="space-y-4">
-      <TimetableBar />
-
       {/* 지수 카드 */}
       <div className="grid grid-cols-2 gap-3">
         <IndexCard label="KOSPI" data={indexData?.kospi} loading={indexLoading} />
