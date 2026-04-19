@@ -369,15 +369,13 @@ def daily_chart(code: str, days: int = 90, force: bool = False) -> list[dict[str
     return bars
 
 
-def _daily_chart_uncached(code: str, days: int = 90) -> list[dict[str, Any]]:
-    """일별 OHLCV. 날짜 오름차순 정렬."""
-    end = datetime.now()
-    start = end - timedelta(days=days * 2 + 10)  # 주말/휴일 여유
+def _daily_chart_fetch_chunk(code: str, start_ymd: str, end_ymd: str) -> list[dict[str, Any]]:
+    """KIS 일봉 1회 호출 (최대 ~100거래일 반환)."""
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_INPUT_ISCD": code,
-        "FID_INPUT_DATE_1": start.strftime("%Y%m%d"),
-        "FID_INPUT_DATE_2": end.strftime("%Y%m%d"),
+        "FID_INPUT_DATE_1": start_ymd,
+        "FID_INPUT_DATE_2": end_ymd,
         "FID_PERIOD_DIV_CODE": "D",
         "FID_ORG_ADJ_PRC": "0",
     }
@@ -407,10 +405,41 @@ def _daily_chart_uncached(code: str, days: int = 90) -> list[dict[str, Any]]:
             )
         except (TypeError, ValueError):
             continue
-    bars.sort(key=lambda b: b["date"])
-    if len(bars) > days:
-        bars = bars[-days:]
     return bars
+
+
+def _daily_chart_uncached(code: str, days: int = 90) -> list[dict[str, Any]]:
+    """KIS inquire-daily-itemchartprice 는 1회 호출당 ~100 거래일 상한.
+    요청한 days가 100 이상이면 날짜 window를 쪼개서 여러 번 호출."""
+    end = datetime.now()
+    # 100 거래일 ≈ 140 달력일. chunk 기준으로 여유 있게 100일 달력창.
+    CHUNK_DAYS = 100
+    total_span = days * 2 + 10  # 주말/휴일 여유 보정
+    all_bars: dict[str, dict[str, Any]] = {}
+    cursor = end
+    remaining = total_span
+    while remaining > 0:
+        chunk = min(CHUNK_DAYS, remaining)
+        chunk_start = cursor - timedelta(days=chunk)
+        bars = _daily_chart_fetch_chunk(
+            code,
+            chunk_start.strftime("%Y%m%d"),
+            cursor.strftime("%Y%m%d"),
+        )
+        if not bars:
+            break
+        for b in bars:
+            all_bars[b["date"]] = b
+        cursor = chunk_start - timedelta(days=1)
+        remaining -= chunk
+        # 안전: 100거래일 < CHUNK_DAYS인 구간에 도달하면 stop
+        if len(bars) < 50:
+            break
+
+    merged = sorted(all_bars.values(), key=lambda b: b["date"])
+    if len(merged) > days:
+        merged = merged[-days:]
+    return merged
 
 
 def minute_chart(code: str, start_hhmmss: str = "") -> list[dict[str, Any]]:
@@ -460,25 +489,16 @@ def minute_chart(code: str, start_hhmmss: str = "") -> list[dict[str, Any]]:
     return bars
 
 
-def minute_chart_daily(
-    code: str,
-    date: str,
-    start_hhmmss: str = "153000",
+def _minute_chart_daily_chunk(
+    code: str, date: str, start_hhmmss: str
 ) -> list[dict[str, Any]]:
-    """특정 영업일 1분봉 (KIS inquire-time-dailychartprice TR).
-
-    KIS는 영업일별로 과거 30거래일까지 제공.
-    date: YYYYMMDD (예: '20260417')
-    start_hhmmss: 조회 시작 시각. 기본 '153000'(장마감 시점부터 역순).
-    응답은 120개씩 페이징되지만 9:00~15:30 장중 390분이 한 호출로 대부분 반환됨.
-    """
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_INPUT_ISCD": code,
-        "FID_INPUT_DATE_1": date,
         "FID_INPUT_HOUR_1": start_hhmmss,
-        "FID_PW_DATA_INCU_YN": "Y",
-        "FID_FAKE_C": "",
+        "FID_INPUT_DATE_1": date,
+        "FID_PW_DATA_INCU_YN": "N",
+        "FID_FAKE_TICK_INCU_YN": "N",
     }
     data = _get(
         "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
@@ -507,8 +527,36 @@ def minute_chart_daily(
             )
         except (TypeError, ValueError):
             continue
-    bars.sort(key=lambda b: b["hhmmss"])
     return bars
+
+
+def minute_chart_daily(
+    code: str,
+    date: str,
+    start_hhmmss: str = "153000",
+) -> list[dict[str, Any]]:
+    """특정 영업일 1분봉. KIS 1회 120개 상한이라 시각을 역순으로 페이징.
+
+    date: YYYYMMDD
+    """
+    all_bars: dict[str, dict[str, Any]] = {}
+    cursor = start_hhmmss
+    for _ in range(5):  # 최대 5페이지 (>=600분), 장중 390분이면 3~4페이지면 충분
+        bars = _minute_chart_daily_chunk(code, date, cursor)
+        if not bars:
+            break
+        for b in bars:
+            all_bars[b["hhmmss"]] = b
+        # 다음 페이지 시작점 = 이번 페이지 최소 hhmmss - 1분
+        min_hh = min(b["hhmmss"] for b in bars)
+        if min_hh <= "090000":
+            break
+        h, m = int(min_hh[:2]), int(min_hh[2:4])
+        total_min = h * 60 + m - 1
+        if total_min <= 9 * 60:
+            break
+        cursor = f"{total_min // 60:02d}{total_min % 60:02d}00"
+    return sorted(all_bars.values(), key=lambda b: b["hhmmss"])
 
 
 def minute_chart_history(code: str, days: int = 5) -> list[dict[str, Any]]:
