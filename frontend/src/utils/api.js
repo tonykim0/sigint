@@ -28,6 +28,8 @@ export const api = {
     getJSON(
       `/api/chart/${code}?period=D&days=${days}&indicators=${indicators}`,
     ),
+  chartAnalysis: (code, { days = 120 } = {}) =>
+    getJSON(`/api/chart-analysis/${code}?days=${days}`),
   investorTrend: (code) => getJSON(`/api/investor-trend/${code}`),
   minuteChart: (code, { timeUnit = 1 } = {}) =>
     getJSON(`/api/minute-chart/${code}?time_unit=${timeUnit}`),

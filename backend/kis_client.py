@@ -306,7 +306,22 @@ def daily_index_chart(index_code: str, days: int = 30) -> list[dict[str, Any]]:
     return bars
 
 
-def inquire_price(code: str) -> dict[str, Any]:
+_PRICE_CACHE: dict[str, Any] = {}
+_PRICE_TTL = 30.0
+
+
+def inquire_price(code: str, force: bool = False) -> dict[str, Any]:
+    import time as _time
+    now = _time.time()
+    cached = _PRICE_CACHE.get(code)
+    if not force and cached and now - cached[0] < _PRICE_TTL:
+        return cached[1]
+    result = _inquire_price_uncached(code)
+    _PRICE_CACHE[code] = (now, result)
+    return result
+
+
+def _inquire_price_uncached(code: str) -> dict[str, Any]:
     """현재가 조회."""
     params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
     data = _get(

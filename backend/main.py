@@ -340,6 +340,55 @@ def api_breakout_swing(force: bool = Query(False)) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/chart-analysis/{code}")
+def api_chart_analysis(
+    code: str = Path(..., pattern=_CODE_PATTERN),
+    days: int = Query(120, ge=20, le=500),
+) -> dict:
+    """차트분석 탭용 통합 엔드포인트: price + chart + 4개 패턴을 병렬 수집."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _price():
+        try:
+            data = inquire_price(code)
+            data["name"] = stock_db.get_name(code)
+            return data
+        except KISError:
+            return None
+
+    def _chart():
+        try:
+            bars = daily_chart(code, days=max(days, 300))  # 패턴도 같이 쓰도록 300
+            analysis = analyzers.analyze(bars[-days:] if len(bars) > days else bars)
+            return {"bars": bars[-days:] if len(bars) > days else bars, "analysis": analysis, "_full_bars": bars}
+        except KISError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        price_f = ex.submit(_price)
+        chart_f = ex.submit(_chart)
+        price = price_f.result()
+        chart = chart_f.result()
+
+    full_bars = chart.get("_full_bars") if chart else []
+    patterns = {
+        "trendTemplate": analyzers.trend_template(full_bars) if full_bars else None,
+        "vcp": analyzers.vcp_pattern(full_bars) if full_bars else None,
+        "darvas": analyzers.darvas_box(full_bars) if full_bars else None,
+        "refCandles": {
+            "count": 0, "candles": analyzers.reference_candle_scan(full_bars, lookback=10)
+        } if full_bars else None,
+    }
+    if patterns["refCandles"]:
+        patterns["refCandles"]["count"] = len(patterns["refCandles"]["candles"])
+
+    chart_out = None
+    if chart:
+        chart_out = {"code": code, "bars": chart["bars"], "count": len(chart["bars"]), "analysis": chart["analysis"]}
+
+    return {"price": price, "chart": chart_out, "patterns": patterns}
+
+
 @app.get("/api/screener/trend-template/{code}")
 def api_trend_template(code: str = Path(..., pattern=_CODE_PATTERN)) -> dict:
     try:

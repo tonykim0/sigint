@@ -414,28 +414,22 @@ export default function ChartAnalysis({ initialCode }) {
     if (!/^\d{6}$/.test(code)) return;
     let cancelled = false;
 
-    Promise.all([api.price(code), api.chart(code, { days: 120 })])
-      .then(([p, c]) => {
+    // 통합 엔드포인트: price + chart + 패턴 4개를 한 번에
+    api.chartAnalysis(code, { days: 120 })
+      .then((d) => {
         if (cancelled) return;
-        setPrice(p);
-        setChart(c);
+        setPrice(d.price || null);
+        setChart(d.chart || null);
+        setPatterns(d.patterns || null);
       })
       .catch((e) => {
         if (cancelled) return;
         setPrice(null);
         setChart(null);
+        setPatterns(null);
         setErr(e.message);
       })
       .finally(() => !cancelled && setLoading(false));
-    // 패턴 분석 (별도 — 일봉 기준 분석이므로 일봉일 때만 의미)
-    Promise.all([
-      api.screener.trendTemplate(code).catch(() => null),
-      api.screener.vcp(code).catch(() => null),
-      api.screener.darvasBox(code).catch(() => null),
-      api.screener.referenceCandle(code, 10).catch(() => null),
-    ]).then(([tt, vcp, darvas, refCandles]) => {
-      if (!cancelled) setPatterns({ trendTemplate: tt, vcp, darvas, refCandles });
-    });
     return () => { cancelled = true; };
   }, [code, requestKey]);
 
