@@ -35,8 +35,8 @@ export const api = {
   chartAnalysis: (code, { days = 120 } = {}) =>
     getJSON(`/api/chart-analysis/${code}?days=${days}`),
   investorTrend: (code) => getJSON(`/api/investor-trend/${code}`),
-  minuteChart: (code, { timeUnit = 1 } = {}) =>
-    getJSON(`/api/minute-chart/${code}?time_unit=${timeUnit}`),
+  minuteChart: (code, { timeUnit = 1, days = 1 } = {}) =>
+    getJSON(`/api/minute-chart/${code}?time_unit=${timeUnit}&days=${days}`),
   index: () => getJSON('/api/index'),
   investorSummary: ({ topN = 10, force = false } = {}) =>
     getJSON(`/api/investor-summary?top_n=${topN}${force ? '&force=true' : ''}`),

@@ -12,6 +12,7 @@ from kis_client import (
     inquire_investor,
     inquire_price,
     minute_chart,
+    minute_chart_history,
 )
 from routers.common import CODE_PATTERN
 from services.chart_analysis_service import get_chart_analysis_payload
@@ -73,10 +74,21 @@ def api_investor_trend(code: str = Path(..., pattern=CODE_PATTERN)) -> dict:
 def api_minute_chart(
     code: str = Path(..., pattern=CODE_PATTERN),
     time_unit: int = Query(1, ge=1, le=60),
+    days: int = Query(1, ge=1, le=30),
 ) -> dict:
+    """분봉 조회. days=1: 당일만, days>=2: 최근 N 영업일 연결."""
     try:
-        raw = minute_chart(code)
+        if days <= 1:
+            raw = minute_chart(code)
+        else:
+            raw = minute_chart_history(code, days=days)
     except KISError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     bars = aggregate_minute_bars(raw, time_unit)
-    return {"code": code, "time_unit": time_unit, "count": len(bars), "bars": bars}
+    return {
+        "code": code,
+        "time_unit": time_unit,
+        "days": days,
+        "count": len(bars),
+        "bars": bars,
+    }

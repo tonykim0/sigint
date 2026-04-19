@@ -460,6 +460,80 @@ def minute_chart(code: str, start_hhmmss: str = "") -> list[dict[str, Any]]:
     return bars
 
 
+def minute_chart_daily(
+    code: str,
+    date: str,
+    start_hhmmss: str = "153000",
+) -> list[dict[str, Any]]:
+    """특정 영업일 1분봉 (KIS inquire-time-dailychartprice TR).
+
+    KIS는 영업일별로 과거 30거래일까지 제공.
+    date: YYYYMMDD (예: '20260417')
+    start_hhmmss: 조회 시작 시각. 기본 '153000'(장마감 시점부터 역순).
+    응답은 120개씩 페이징되지만 9:00~15:30 장중 390분이 한 호출로 대부분 반환됨.
+    """
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_INPUT_ISCD": code,
+        "FID_INPUT_DATE_1": date,
+        "FID_INPUT_HOUR_1": start_hhmmss,
+        "FID_PW_DATA_INCU_YN": "Y",
+        "FID_FAKE_C": "",
+    }
+    data = _get(
+        "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
+        tr_id="FHKST03010230",
+        params=params,
+    )
+    rows = data.get("output2", []) or []
+    d_iso = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+    bars: list[dict[str, Any]] = []
+    for r in rows:
+        hhmmss = r.get("stck_cntg_hour") or ""
+        if len(hhmmss) != 6:
+            continue
+        try:
+            bars.append(
+                {
+                    "time": f"{d_iso} {hhmmss[:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}",
+                    "date": d_iso,
+                    "hhmmss": hhmmss,
+                    "open": int(r.get("stck_oprc") or 0),
+                    "high": int(r.get("stck_hgpr") or 0),
+                    "low": int(r.get("stck_lwpr") or 0),
+                    "close": int(r.get("stck_prpr") or 0),
+                    "volume": int(r.get("cntg_vol") or 0),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    bars.sort(key=lambda b: b["hhmmss"])
+    return bars
+
+
+def minute_chart_history(code: str, days: int = 5) -> list[dict[str, Any]]:
+    """최근 N 영업일 1분봉 연결 반환.
+
+    daily_chart 로 실제 영업일을 알아낸 뒤 각 날짜별 minute_chart_daily 를 병렬 조회.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        dailies = daily_chart(code, days=max(days + 5, 15))
+    except KISError:
+        return []
+    trading_days = [b["date"].replace("-", "") for b in dailies[-days:]]
+    all_bars: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = [ex.submit(minute_chart_daily, code, d) for d in trading_days]
+        for f in futures:
+            try:
+                all_bars.extend(f.result())
+            except KISError:
+                continue
+    all_bars.sort(key=lambda b: (b.get("date", ""), b.get("hhmmss", "")))
+    return all_bars
+
+
 def aggregate_minute_bars(
     bars: list[dict[str, Any]], unit_min: int
 ) -> list[dict[str, Any]]:

@@ -42,7 +42,7 @@ export function useChartAnalysisData(initialCode) {
     if (!/^\d{6}$/.test(code)) return;
     let cancelled = false;
 
-    api.chartAnalysis(code, { days: 120 })
+    api.chartAnalysis(code, { days: 500 })
       .then((data) => {
         if (cancelled) return;
         setPrice(data.price || null);
@@ -68,7 +68,10 @@ export function useChartAnalysisData(initialCode) {
   useEffect(() => {
     if (!/^\d{6}$/.test(code) || !isIntraday) return;
     let cancelled = false;
-    api.minuteChart(code, { timeUnit: parseInt(timeframe, 10) })
+    // 분봉은 기본 5거래일 치 조회. 1분봉만 30일치 허용 (너무 많은 바 방지)
+    const tf = parseInt(timeframe, 10);
+    const minuteDays = tf <= 5 ? 5 : 10;
+    api.minuteChart(code, { timeUnit: tf, days: minuteDays })
       .then((data) => {
         if (!cancelled) setMinuteBars(data.bars || []);
       })
