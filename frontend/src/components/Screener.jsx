@@ -199,7 +199,7 @@ function WeightCalc() {
   const part1 = Math.floor((parsed * 0.6) / 10) * 10;
   const part2 = Math.floor((parsed * 0.4) / 10) * 10;
   return (
-    <div className="mt-4 p-3 rounded-lg bg-bg-inner border border-border">
+    <div className="mb-4 p-3 rounded-lg bg-bg-inner border border-border">
       <div className="text-xs text-fg-muted mb-2 font-medium">비중 계산기</div>
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
@@ -273,6 +273,7 @@ function ClosingBetTab({ onSelectCode, onGoJournal }) {
   return (
     <div>
       {top && top.pass_count >= 3 && <ClosingEntryPlan stock={top} />}
+      <WeightCalc />
       <div className="flex items-center gap-4 mb-3 text-xs flex-wrap">
         <span className="inline-flex items-center gap-1.5">
           <span className="w-3 h-3 rounded-sm bg-up/40 inline-block" />
@@ -382,7 +383,6 @@ function ClosingBetTab({ onSelectCode, onGoJournal }) {
           </tbody>
         </table>
       </div>
-      <WeightCalc />
     </div>
   );
 }
@@ -414,6 +414,12 @@ function PullbackTab({ onSelectCode }) {
   return (
     <div>
       {topPB && topPB.pass_count >= 3 && <PullbackEntryPlan stock={topPB} />}
+      <div className="mb-3 p-3 rounded-lg bg-bg-inner border border-border text-xs text-fg-muted leading-relaxed">
+        <span className="text-fg-bright font-medium">전략 개요</span> — 1-2-2 분할 매수 (20%→40%→40%) ·{' '}
+        <span className="text-warn">손절</span> 매수가 -5% 또는 기준봉 시가 이탈 ·{' '}
+        <span className="text-up">익절</span> +5% 도달 시 50% 매도, 나머지 5일선 이탈 시 청산 ·{' '}
+        <span className="text-down">타임컷</span> 3거래일 횡보 시 본절
+      </div>
       <div className="flex items-center gap-3 mb-3 text-xs">
         <span className="text-fg-muted">기준봉 출현 후 눌림 구간 매수 타점 탐색</span>
         <div className="ml-auto flex items-center gap-2">
@@ -496,12 +502,6 @@ function PullbackTab({ onSelectCode }) {
         </table>
       </div>
 
-      <div className="mt-3 p-3 rounded-lg bg-bg-inner border border-border text-xs text-fg-muted leading-relaxed">
-        <span className="text-fg-bright font-medium">진입 가이드</span> — 1-2-2 분할 매수 (20%→40%→40%) ·{' '}
-        <span className="text-warn">손절</span> 매수가 -5% 또는 기준봉 시가 이탈 ·{' '}
-        <span className="text-up">익절</span> +5% 도달 시 50% 매도, 나머지 5일선 이탈 시 청산 ·{' '}
-        <span className="text-down">타임컷</span> 3거래일 횡보 시 본절
-      </div>
     </div>
   );
 }
@@ -524,6 +524,12 @@ function BreakoutTab({ onSelectCode }) {
   return (
     <div>
       {topBO && topBO.pass_count >= 3 && <BreakoutEntryPlan stock={topBO} />}
+      <div className="mb-3 p-3 rounded-lg bg-bg-inner border border-border text-xs text-fg-muted leading-relaxed">
+        <span className="text-fg-bright font-medium">전략 개요</span> — 돌파 확인 후 종가 1차 진입 (장중 추격 금지) ·{' '}
+        <span className="text-warn">손절</span> 매수가 -5~8% 또는 박스 하단 이탈 ·{' '}
+        <span className="text-up">익절</span> 평균 손실의 2~3배 분할 매도 ·{' '}
+        <span className="text-accent">피라미딩</span> 새 박스 상단 돌파 시 추가 가능
+      </div>
       <div className="flex items-center gap-3 mb-3 text-xs">
         <span className="text-fg-muted">전고점 돌파 + 추세 적격 종목 탐색 (미너비니 기반)</span>
         <div className="ml-auto flex items-center gap-2">
@@ -589,12 +595,6 @@ function BreakoutTab({ onSelectCode }) {
         </table>
       </div>
 
-      <div className="mt-3 p-3 rounded-lg bg-bg-inner border border-border text-xs text-fg-muted leading-relaxed">
-        <span className="text-fg-bright font-medium">진입 가이드</span> — 돌파 확인 후 종가 1차 진입 (장중 추격 금지) ·{' '}
-        <span className="text-warn">손절</span> 매수가 -5~8% 또는 박스 하단 이탈 ·{' '}
-        <span className="text-up">익절</span> 평균 손실의 2~3배 분할 매도 ·{' '}
-        <span className="text-accent">피라미딩</span> 새 박스 상단 돌파 시 추가 가능
-      </div>
     </div>
   );
 }
