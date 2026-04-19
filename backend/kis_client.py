@@ -27,7 +27,15 @@ BASE_URL = (
     else "https://openapi.koreainvestment.com:9443"
 )
 
-TOKEN_CACHE_PATH = Path(__file__).with_name(".token_cache.json")
+def _resolve_token_cache_path() -> Path:
+    """KIS 토큰 캐시 위치. SIGINT_DATA_DIR 환경변수 있으면 그 아래, 없으면 data/ 폴더."""
+    override = os.getenv("SIGINT_DATA_DIR", "").strip()
+    base = Path(override) if override else Path(__file__).parent / "data"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / ".token_cache.json"
+
+
+TOKEN_CACHE_PATH = _resolve_token_cache_path()
 _TOKEN_LOCK = threading.Lock()
 _TOKEN_STATE: dict[str, Any] = {"access_token": None, "expires_at": 0.0}
 

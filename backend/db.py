@@ -15,7 +15,10 @@ def database_path() -> Path:
     configured = os.getenv("SIGINT_DB_PATH", "").strip()
     if configured:
         return Path(configured)
-    return Path(__file__).parent / "data" / "sigint.db"
+    data_dir = os.getenv("SIGINT_DATA_DIR", "").strip()
+    base = Path(data_dir) if data_dir else Path(__file__).parent / "data"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "sigint.db"
 
 
 def _legacy_journal_path() -> Path:
