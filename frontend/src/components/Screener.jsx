@@ -52,6 +52,112 @@ function rowBg(score, max) {
   return '';
 }
 
+// ── 진입 플랜 패널 ───────────────────────────────────────────────
+function EntryPlanCard({ title, items, note }) {
+  return (
+    <div className="mb-4 p-4 rounded-lg border border-accent/40 bg-accent/5">
+      <div className="text-xs text-accent font-semibold mb-2">🎯 {title}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {items.map((it) => (
+          <div key={it.label} className="bg-bg-inner rounded-md px-3 py-2">
+            <div className="text-[10px] text-fg-muted">{it.label}</div>
+            <div className={`text-sm font-semibold tabular-nums ${it.color || 'text-fg-white'}`}>
+              {it.value}
+            </div>
+            {it.sub && <div className="text-[10px] text-fg-muted">{it.sub}</div>}
+          </div>
+        ))}
+      </div>
+      {note && <div className="mt-2 text-[11px] text-fg-muted leading-relaxed">{note}</div>}
+    </div>
+  );
+}
+
+function ClosingEntryPlan({ stock }) {
+  if (!stock) return null;
+  const price = stock.price;
+  return (
+    <EntryPlanCard
+      title={`종가배팅 1순위 — ${stock.name} (${stock.pass_count}/5 통과)`}
+      items={[
+        { label: '진입 타이밍', value: '14:30 ~ 15:20 종가 부근', color: 'text-accent' },
+        { label: '1차 진입가', value: `${Math.round(price * 0.997).toLocaleString('ko-KR')} ~ ${price.toLocaleString('ko-KR')}`, sub: '현재가 -0.3%~현재가' },
+        { label: '비중 분할', value: '종가 60% + 익일 시초 40%', color: 'text-warn' },
+        { label: '손절선', value: Math.round(price * 0.97).toLocaleString('ko-KR'), color: 'text-down', sub: '진입가 -3%' },
+        { label: '1차 익절', value: Math.round(price * 1.03).toLocaleString('ko-KR'), color: 'text-up', sub: '진입가 +3% (50% 매도)' },
+        { label: '손익비', value: '1 : 1 (종가배팅)', sub: '단타 원칙' },
+      ]}
+      note="• 오늘 장마감 전 양매수 지속 확인 후 진입  • 익일 시초 40%는 갭 방향에 따라 판단 (갭상승 시 매도, 갭하락 시 추가매수)"
+    />
+  );
+}
+
+function PullbackEntryPlan({ stock }) {
+  if (!stock) return null;
+  const { detail = {}, price } = stock;
+  const ma5 = detail.ma5;
+  const refMid = detail.ref_mid;
+  const refOpen = detail.ref_open;
+  const entry1 = Math.min(ma5 || Infinity, refMid || Infinity);
+  const validEntry = entry1 !== Infinity ? Math.round(entry1) : price;
+  const stop = refOpen ? Math.min(refOpen, Math.round(validEntry * 0.95)) : Math.round(validEntry * 0.95);
+  const target = Math.round(validEntry * 1.05);
+  return (
+    <EntryPlanCard
+      title={`눌림목 스윙 1순위 — ${stock.name} (${stock.pass_count}/4 통과)`}
+      items={[
+        { label: '1차 진입가 (20%)', value: validEntry.toLocaleString('ko-KR'), color: 'text-accent',
+          sub: refMid ? `기준봉 중간 ${refMid.toLocaleString('ko-KR')} / MA5 ${ma5?.toLocaleString('ko-KR')}` : '5일선 부근' },
+        { label: '2차 진입가 (40%)', value: Math.round(validEntry * 0.98).toLocaleString('ko-KR'), sub: '1차 -2%' },
+        { label: '3차 진입가 (40%)', value: Math.round(validEntry * 0.96).toLocaleString('ko-KR'), sub: '1차 -4%' },
+        { label: '손절선', value: stop.toLocaleString('ko-KR'), color: 'text-down',
+          sub: refOpen ? `기준봉 시가 ${refOpen.toLocaleString('ko-KR')} 또는 -5%` : '평단 -5%' },
+        { label: '1차 익절', value: target.toLocaleString('ko-KR'), color: 'text-up', sub: '평단 +5% (50% 매도)' },
+        { label: '타임컷', value: '3거래일 횡보', sub: '본절 부근 청산' },
+      ]}
+      note={
+        `• 현재가 ${price.toLocaleString('ko-KR')} · 기준봉 ${detail.reference_candle?.date || '—'} (경과 ${detail.days_since_ref ?? '—'}일, 거래량 ${detail.reference_candle?.vol_ratio ?? '—'}x)  ` +
+        `• 잔여 50% 는 5일선 이탈 시 청산`
+      }
+    />
+  );
+}
+
+function BreakoutEntryPlan({ stock }) {
+  if (!stock) return null;
+  const { detail = {}, price } = stock;
+  const box = detail.darvas || {};
+  const boxTop = box.box_top;
+  const boxBottom = box.box_bottom;
+  const recentHigh = detail.recent_high;
+  const entry = Math.round(boxTop || recentHigh || price);
+  const stop = Math.round(boxBottom || entry * 0.92);
+  const loss = entry - stop;
+  const target1 = Math.round(entry + loss * 2);
+  const target2 = Math.round(entry + loss * 3);
+  return (
+    <EntryPlanCard
+      title={`돌파 스윙 1순위 — ${stock.name} (${stock.pass_count}/5 통과)`}
+      items={[
+        { label: '진입가 (돌파 확인 후)', value: entry.toLocaleString('ko-KR'), color: 'text-accent',
+          sub: boxTop ? `다바스 상단 ${boxTop.toLocaleString('ko-KR')}` : (recentHigh ? `전고점 ${recentHigh.toLocaleString('ko-KR')}` : '현재가') },
+        { label: '현재가', value: price.toLocaleString('ko-KR'),
+          sub: detail.near_high_dist_pct != null ? `전고점까지 ${detail.near_high_dist_pct}%` : '' },
+        { label: '손절선', value: stop.toLocaleString('ko-KR'), color: 'text-down',
+          sub: boxBottom ? `박스 하단 ${boxBottom.toLocaleString('ko-KR')}` : '진입가 -8%' },
+        { label: '1차 익절 (R×2)', value: target1.toLocaleString('ko-KR'), color: 'text-up', sub: `+${(target1 / entry * 100 - 100).toFixed(1)}%` },
+        { label: '2차 익절 (R×3)', value: target2.toLocaleString('ko-KR'), color: 'text-up', sub: `+${(target2 / entry * 100 - 100).toFixed(1)}%` },
+        { label: '타이밍', value: '돌파 확인 당일 종가', color: 'text-accent', sub: '장중 추격 금지' },
+      ]}
+      note={
+        `• 돌파 확인 = 전고점 돌파 + 거래량 50일 평균 150%+  ` +
+        `• 손실폭 1R = ${loss.toLocaleString('ko-KR')}원  ` +
+        `• 익절 후 새 박스 형성 시 피라미딩 추가 매수 가능`
+      }
+    />
+  );
+}
+
 // ── 시황 배너 ────────────────────────────────────────────────────
 
 function RegimeBanner({ regime }) {
@@ -162,8 +268,11 @@ function ClosingBetTab({ onSelectCode, onGoJournal }) {
   const updateNote = (code, note) =>
     setMemos((p) => ({ ...p, [code]: { ...(p[code] || { hasMaterial: false }), note } }));
 
+  const top = sorted[0];
+
   return (
     <div>
+      {top && top.pass_count >= 3 && <ClosingEntryPlan stock={top} />}
       <div className="flex items-center gap-4 mb-3 text-xs flex-wrap">
         <span className="inline-flex items-center gap-1.5">
           <span className="w-3 h-3 rounded-sm bg-up/40 inline-block" />
@@ -300,8 +409,11 @@ function PullbackTab({ onSelectCode }) {
     }));
   }, [data, memos]);
 
+  const topPB = [...rows].sort((a, b) => (b.pass_count || 0) - (a.pass_count || 0))[0];
+
   return (
     <div>
+      {topPB && topPB.pass_count >= 3 && <PullbackEntryPlan stock={topPB} />}
       <div className="flex items-center gap-3 mb-3 text-xs">
         <span className="text-fg-muted">기준봉 출현 후 눌림 구간 매수 타점 탐색</span>
         <div className="ml-auto flex items-center gap-2">
@@ -407,9 +519,11 @@ const BO_FILTERS = [
 function BreakoutTab({ onSelectCode }) {
   const { data, loading, err, refresh } = useScreenerData('breakout');
   const rows = data?.stocks || [];
+  const topBO = [...rows].sort((a, b) => (b.pass_count || 0) - (a.pass_count || 0))[0];
 
   return (
     <div>
+      {topBO && topBO.pass_count >= 3 && <BreakoutEntryPlan stock={topBO} />}
       <div className="flex items-center gap-3 mb-3 text-xs">
         <span className="text-fg-muted">전고점 돌파 + 추세 적격 종목 탐색 (미너비니 기반)</span>
         <div className="ml-auto flex items-center gap-2">

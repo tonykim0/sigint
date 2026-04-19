@@ -272,8 +272,13 @@ def _eval_pullback(
         near_ma5 = bool(ma5 and abs(price / ma5 - 1) <= 0.03)
         if ref_candles:
             ref_bar = daily[-(ref_candles[0]["bars_ago"] + 1)]
-            rb_mid = (float(ref_bar["open"]) + float(ref_bar["close"])) / 2
+            rb_open = float(ref_bar["open"])
+            rb_close = float(ref_bar["close"])
+            rb_mid = (rb_open + rb_close) / 2
             near_mid = price >= rb_mid * 0.97
+            detail["ref_open"] = int(rb_open)
+            detail["ref_close"] = int(rb_close)
+            detail["ref_mid"] = int(rb_mid)
         else:
             near_mid = False
         filters["support_level"] = near_ma5 or near_mid
