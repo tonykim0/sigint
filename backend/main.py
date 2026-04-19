@@ -10,6 +10,7 @@ import analyzers
 import daily_store
 import journal
 import market_flow as market_flow_mod
+import theme_trend as theme_trend_mod
 from kis_client import (
     KISError,
     aggregate_minute_bars,
@@ -119,6 +120,17 @@ def api_search(
     limit: int = Query(10, ge=1, le=20),
 ) -> dict:
     return {"results": stock_db.search(q, limit=limit)}
+
+
+@app.get("/api/theme-trend")
+def api_theme_trend(
+    days: int = Query(7, ge=3, le=30),
+    force: bool = Query(False),
+) -> dict:
+    try:
+        return theme_trend_mod.theme_trend(days=days, force=force)
+    except KISError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/api/themes")

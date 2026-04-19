@@ -4,6 +4,8 @@ import {
   BarChart,
   CartesianGrid,
   Legend,
+  Line,
+  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -77,8 +79,8 @@ function buildThemesFromAPI(rankItems, codeThemeMap) {
   });
 }
 
-// KIS 투자자 값은 천원 단위 — 원으로 변환
-const KIS_UNIT = 1000;
+// KIS 투자자 금액(frgn_ntby_tr_pbmn 등)은 백만원 단위
+const KIS_UNIT = 1_000_000;
 
 // ── 시장 수급 (개인/기관/외인) ──────────────────────────────────
 function MarketFlowCard({ label, flow, loading }) {
@@ -99,8 +101,8 @@ function MarketFlowCard({ label, flow, loading }) {
   return (
     <div className="bg-bg-card border border-border rounded-xl p-[18px]">
       <div className="flex items-baseline justify-between mb-3">
-        <div className="text-sm font-bold text-fg-white">{label}</div>
-        <div className="text-[10px] text-fg-muted">현물 · TOP {flow.count || 10} 합산</div>
+        <div className="text-sm font-bold text-fg-white">{label} <span className="text-[10px] text-fg-muted font-normal">· 현물 순매수</span></div>
+        <div className="text-[10px] text-fg-muted">TOP {flow.count || 10} 합산 · 단위 원</div>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {parts.map((p) => {
@@ -122,15 +124,15 @@ function MarketFlowCard({ label, flow, loading }) {
 
 // ── 30일 수급 히스토리 차트 ───────────────────────────────────────
 function FlowHistoryChart({ label, history, loading }) {
-  // history: [{date, foreign, institution, individual}] — 값은 천원
-  // 1억 = 100,000천원
+  // history: [{date, foreign, institution, individual}] — KIS 값은 백만원 단위
+  // 1억원 = 100 백만원
   const data = useMemo(() => {
-    const UK_KRW = 100_000; // 1억원을 천원 단위로
+    const UK_MN = 100;
     return (history || []).map((r) => ({
       date: r.date?.slice(5) || '',   // "MM-DD"
-      외인: +(r.foreign / UK_KRW).toFixed(0),
-      기관: +(r.institution / UK_KRW).toFixed(0),
-      개인: +(r.individual / UK_KRW).toFixed(0),
+      외인: +(r.foreign / UK_MN).toFixed(0),
+      기관: +(r.institution / UK_MN).toFixed(0),
+      개인: +(r.individual / UK_MN).toFixed(0),
     }));
   }, [history]);
 
@@ -228,6 +230,7 @@ export default function Overview({ onSelectCode }) {
   const [flow, setFlow] = useState(null);
   const [flowLoading, setFlowLoading] = useState(true);
   const [themes, setThemes] = useState({});
+  const [trendMap, setTrendMap] = useState({}); // { theme: {series, change_pct} }
   const [loading, setLoading] = useState(true);
   const [indexLoading, setIndexLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -268,6 +271,16 @@ export default function Overview({ onSelectCode }) {
     api.marketFlow()
       .then((d) => { if (!cancelled) { setFlow(d); setFlowLoading(false); } })
       .catch(() => { if (!cancelled) setFlowLoading(false); });
+
+    // 테마 트렌드 (1주일) — 백그라운드
+    api.themeTrend(7)
+      .then((d) => {
+        if (cancelled) return;
+        const m = {};
+        (d.themes || []).forEach((t) => { m[t.theme] = t; });
+        setTrendMap(m);
+      })
+      .catch(() => {});
 
     return () => { cancelled = true; };
   }, []);
@@ -322,7 +335,11 @@ export default function Overview({ onSelectCode }) {
           <div className="text-xs text-fg-muted">{loading ? '조회 중…' : '감지된 테마 없음'}</div>
         ) : (
           <div className="space-y-3">
-            {themeList.map((g, i) => (
+            {themeList.map((g, i) => {
+              const trend = trendMap[g.theme];
+              const sparkData = trend?.series?.map((s) => ({ date: s.date, value: s.value })) || [];
+              const changePct = trend?.change_pct;
+              return (
               <div
                 key={g.theme}
                 className="rounded-lg border border-border overflow-hidden"
@@ -345,6 +362,25 @@ export default function Overview({ onSelectCode }) {
                       </span>
                     )}
                   </div>
+                  {/* 1주일 스파크라인 */}
+                  {sparkData.length >= 2 && (
+                    <div className="w-20 h-7 shrink-0" title="최근 1주일 거래대금">
+                      <ResponsiveContainer>
+                        <LineChart data={sparkData}>
+                          <Line type="monotone" dataKey="value" stroke={g.color} strokeWidth={1.5} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                  {/* 1주일 전반 vs 후반 변화율 */}
+                  {changePct != null && (
+                    <span
+                      className={`text-[11px] font-semibold tabular-nums shrink-0 ${changePct >= 0 ? 'text-up' : 'text-down'}`}
+                      title="전반 3일 vs 후반 3일 거래대금 변화"
+                    >
+                      {changePct > 0 ? '▲' : changePct < 0 ? '▼' : ''}{Math.abs(changePct).toFixed(0)}%
+                    </span>
+                  )}
                   <span className="text-sm text-accent font-semibold tabular-nums shrink-0">
                     {formatKRWCompact(g.value)}
                   </span>
@@ -376,7 +412,8 @@ export default function Overview({ onSelectCode }) {
                   </tbody>
                 </table>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>

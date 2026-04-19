@@ -36,6 +36,7 @@ export const api = {
   marketFlow: () => getJSON('/api/market-flow'),
   search: (q) => getJSON(`/api/search?q=${encodeURIComponent(q)}`),
   themes: () => getJSON('/api/themes'),
+  themeTrend: (days = 7) => getJSON(`/api/theme-trend?days=${days}`),
   screener: {
     closingBet: ({ force = false } = {}) =>
       getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`),

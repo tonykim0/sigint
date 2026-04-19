@@ -20,8 +20,8 @@ import {
 } from '../utils/format.js';
 import Card from './Card.jsx';
 
-// 투자자별 순매수 금액(천원 단위 → 원 단위로 ×1000)
-const UNIT = 1000;
+// 투자자별 순매수 금액: KIS 응답은 백만원 단위 → 원으로 변환
+const UNIT = 1_000_000;
 
 export default function SupplyDemand({ onSelectCode }) {
   const [rows, setRows] = useState([]);
