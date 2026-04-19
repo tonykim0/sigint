@@ -49,6 +49,12 @@ export function excludeETF(items) {
   return (items || []).filter((r) => !isETF(r.name));
 }
 
+// 우선주 감지 — 이름 끝이 '우' 또는 '우B', '2우B' 등
+export function isPreferred(name) {
+  if (!name) return false;
+  return /우[AB]?$/.test(name) || /\d우[AB]?$/.test(name) || name.includes('2우B');
+}
+
 export function formatTime(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;

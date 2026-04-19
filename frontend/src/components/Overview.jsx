@@ -17,7 +17,10 @@ import {
   formatChangeRate,
   formatInt,
   formatKRWCompact,
+  isPreferred,
 } from '../utils/format.js';
+
+const MIN_TRADE_VALUE = 10_000_000_000; // 100억
 import Card from './Card.jsx';
 
 // ── 지수 카드 ────────────────────────────────────────────────────
@@ -290,9 +293,15 @@ export default function Overview({ onSelectCode }) {
     return map;
   }, [themes]);
 
+  // 주도 테마는 우선주/100억 미만 추가 제외
+  const themeSource = useMemo(
+    () => top.filter((r) => !isPreferred(r.name) && (r.trade_value || 0) >= MIN_TRADE_VALUE),
+    [top],
+  );
+
   const themeList = useMemo(
-    () => buildThemesFromAPI(top, codeThemeMap),
-    [top, codeThemeMap],
+    () => buildThemesFromAPI(themeSource, codeThemeMap),
+    [themeSource, codeThemeMap],
   );
 
   return (
@@ -315,10 +324,10 @@ export default function Overview({ onSelectCode }) {
         <FlowHistoryChart label="KOSDAQ" history={flow?.kosdaq?.history} loading={flowLoading} />
       </div>
 
-      {/* 주도 테마 (상위 60종목, ETF 제외, 섹터별 묶음) */}
+      {/* 주도 테마 (상위 60종목, ETF/우선주/100억미만 제외, 섹터별 묶음) */}
       <Card
         title="오늘의 주도 테마"
-        subtitle={`거래대금 상위 60개 · ${top.length}종목 · ETF 제외`}
+        subtitle={`${themeSource.length}종목 · ETF · 우선주 · 100억 미만 제외`}
       >
         {themeList.length === 0 ? (
           <div className="text-xs text-fg-muted">{loading ? '조회 중…' : '감지된 테마 없음'}</div>
