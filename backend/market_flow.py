@@ -15,7 +15,7 @@ from typing import Any
 from kis_client import KISError, inquire_investor, volume_rank
 
 _CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
-_CACHE_TTL = 180.0  # 3분
+_CACHE_TTL = 360.0  # 6분 (워밍업 주기 5분 + 여유)
 _LOCK = threading.Lock()
 
 

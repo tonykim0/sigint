@@ -1,10 +1,16 @@
 """FastAPI 엔트리포인트."""
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time as _time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
+
+log = logging.getLogger("sigint.warmup")
 
 import analyzers
 import daily_store
@@ -31,7 +37,68 @@ from schemas import (
 from screener import breakout_swing, closing_bet, market_regime, pullback_swing
 import stock_db
 
-app = FastAPI(title="SIGINT API", version="0.3.0")
+def _warmup_investor_summary() -> None:
+    """investor_summary 캐시에 60개 데이터 미리 채우기."""
+    from concurrent.futures import ThreadPoolExecutor
+    rank = volume_rank("ALL")[:60]
+    def fetch(s):
+        try:
+            rows = inquire_investor(s["code"])
+            latest = rows[0] if rows else {}
+        except KISError:
+            latest = {}
+        return {
+            "code": s["code"],
+            "name": s["name"],
+            "price": s["price"],
+            "change_rate": s["change_rate"],
+            "trade_value": s.get("trade_value", 0),
+            "foreign_value": latest.get("foreign_value", 0),
+            "institution_value": latest.get("institution_value", 0),
+            "individual_value": latest.get("individual_value", 0),
+        }
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        results = list(ex.map(fetch, rank))
+    results.sort(key=lambda r: -(r.get("trade_value") or 0))
+    _INV_SUMMARY_CACHE["ts"] = _time.time()
+    _INV_SUMMARY_CACHE["top_n"] = 60
+    _INV_SUMMARY_CACHE["data"] = results
+
+
+def _warmup_cycle() -> None:
+    """heavy endpoint 캐시 미리 채우기. 조용히 실패해도 무방."""
+    tasks = [
+        ("volume_rank", lambda: volume_rank("ALL")),
+        ("market_regime", lambda: market_regime(force=False)),
+        ("market_flow", lambda: market_flow_mod.market_flow(force=False)),
+        ("theme_trend", lambda: theme_trend_mod.theme_trend(days=7, force=False)),
+        ("investor_summary", lambda: _warmup_investor_summary()),
+    ]
+    for name, fn in tasks:
+        try:
+            started = _time.time()
+            fn()
+            log.warning("warmup %s: %.1fs", name, _time.time() - started)
+        except Exception as exc:
+            log.warning("warmup %s failed: %s", name, exc)
+
+
+def _warmup_loop() -> None:
+    """서버 수명 동안 5분마다 캐시 갱신."""
+    _time.sleep(3)  # 포트 바인딩 여유
+    while True:
+        _warmup_cycle()
+        _time.sleep(300)  # 5분
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    if os.getenv("DISABLE_WARMUP") != "1":
+        threading.Thread(target=_warmup_loop, name="sigint-warmup", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="SIGINT API", version="0.3.0", lifespan=_lifespan)
 
 _EXTRA_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 _ORIGINS = [
@@ -83,7 +150,7 @@ def api_market_flow(force: bool = Query(False)) -> dict:
 
 
 _INV_SUMMARY_CACHE: dict = {"ts": 0.0, "top_n": 0, "data": None}
-_INV_SUMMARY_TTL = 180.0
+_INV_SUMMARY_TTL = 360.0
 
 
 @app.get("/api/investor-summary")

@@ -16,7 +16,7 @@ from typing import Any
 from kis_client import KISError, daily_chart, volume_rank
 
 _CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
-_CACHE_TTL = 600.0
+_CACHE_TTL = 900.0  # 15분
 _LOCK = threading.Lock()
 
 _THEMES_PATH = pathlib.Path(__file__).parent / "data" / "themes.json"
