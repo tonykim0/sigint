@@ -252,7 +252,7 @@ export default function VolumeRank({ onSelectCode }) {
     <div className="space-y-4">
     <Card
       title="거래대금 상위"
-      subtitle={`TOP ${items.length}`}
+      subtitle={`TOP ${filtered.length} · ETF · 우선주 · 100억 미만 제외`}
       right={<span>합계 {formatKRWCompact(total)}</span>}
     >
       <div className="flex items-center gap-2 mb-3 flex-wrap">
