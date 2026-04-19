@@ -1,4 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { api } from '../utils/api.js';
 import {
   changeColor,
@@ -157,6 +168,57 @@ function MarketFlowCard({ label, flow, loading }) {
   );
 }
 
+// ── 30일 수급 히스토리 차트 ───────────────────────────────────────
+function FlowHistoryChart({ label, history, loading }) {
+  // history: [{date, foreign, institution, individual}]
+  const data = useMemo(() => {
+    const UK = 1_0000_0000;
+    return (history || []).map((r) => ({
+      date: r.date?.slice(5) || '',   // "MM-DD"
+      외인: +(r.foreign / UK).toFixed(0),
+      기관: +(r.institution / UK).toFixed(0),
+      개인: +(r.individual / UK).toFixed(0),
+    }));
+  }, [history]);
+
+  if (loading) {
+    return (
+      <Card title={`${label} · 최근 30일 수급`} subtitle="현물 근사치">
+        <div className="h-48 flex items-center justify-center text-fg-muted text-sm">조회 중…</div>
+      </Card>
+    );
+  }
+  if (!data.length) {
+    return (
+      <Card title={`${label} · 최근 30일 수급`} subtitle="현물 근사치">
+        <div className="h-48 flex items-center justify-center text-fg-muted text-sm">데이터 없음</div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card title={`${label} · 최근 30일 수급`} subtitle="단위: 억원">
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2228" />
+          <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 10 }} interval={3} />
+          <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} />
+          <Tooltip
+            contentStyle={{ background: '#0d0f13', border: '1px solid #1e2228', borderRadius: 8, fontSize: 12 }}
+            labelStyle={{ color: '#e5e7eb' }}
+            formatter={(v) => [`${v > 0 ? '+' : ''}${v}억`, '']}
+          />
+          <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+          <ReferenceLine y={0} stroke="#4b5563" />
+          <Bar dataKey="외인" fill="#3b82f6" stackId="flow" />
+          <Bar dataKey="기관" fill="#a78bfa" stackId="flow" />
+          <Bar dataKey="개인" fill="#fb923c" stackId="flow" />
+        </BarChart>
+      </ResponsiveContainer>
+    </Card>
+  );
+}
+
 // ── 외국인 순매수 TOP 5 ────────────────────────────────────────
 function ForeignTop5({ items, onSelectCode }) {
   const top5 = useMemo(
@@ -276,10 +338,16 @@ export default function Overview({ onSelectCode }) {
         <IndexCard label="KOSDAQ" data={indexData?.kosdaq} loading={indexLoading} />
       </div>
 
-      {/* 시장 수급 (현물) */}
+      {/* 시장 수급 (현물) 당일 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <MarketFlowCard label="KOSPI" flow={flow?.kospi} loading={flowLoading} />
         <MarketFlowCard label="KOSDAQ" flow={flow?.kosdaq} loading={flowLoading} />
+      </div>
+
+      {/* 최근 30일 수급 히스토리 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <FlowHistoryChart label="KOSPI" history={flow?.kospi?.history} loading={flowLoading} />
+        <FlowHistoryChart label="KOSDAQ" history={flow?.kosdaq?.history} loading={flowLoading} />
       </div>
 
       {/* 주도 테마 */}
