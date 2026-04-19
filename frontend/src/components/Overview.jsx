@@ -77,6 +77,9 @@ function buildThemesFromAPI(rankItems, codeThemeMap) {
   });
 }
 
+// KIS 투자자 값은 천원 단위 — 원으로 변환
+const KIS_UNIT = 1000;
+
 // ── 시장 수급 (개인/기관/외인) ──────────────────────────────────
 function MarketFlowCard({ label, flow, loading }) {
   if (loading || !flow) {
@@ -88,41 +91,26 @@ function MarketFlowCard({ label, flow, loading }) {
     );
   }
   const parts = [
-    { key: 'foreign', label: '외인', color: '#3b82f6', value: flow.foreign },
-    { key: 'institution', label: '기관', color: '#a78bfa', value: flow.institution },
-    { key: 'individual', label: '개인', color: '#fb923c', value: flow.individual },
+    { key: 'foreign', label: '외인', value: (flow.foreign || 0) * KIS_UNIT },
+    { key: 'institution', label: '기관', value: (flow.institution || 0) * KIS_UNIT },
+    { key: 'individual', label: '개인', value: (flow.individual || 0) * KIS_UNIT },
   ];
-  const maxAbs = Math.max(...parts.map((p) => Math.abs(p.value)), 1);
 
   return (
     <div className="bg-bg-card border border-border rounded-xl p-[18px]">
       <div className="flex items-baseline justify-between mb-3">
         <div className="text-sm font-bold text-fg-white">{label}</div>
-        <div className="text-[10px] text-fg-muted">현물 TOP {flow.count || 10} 합산</div>
+        <div className="text-[10px] text-fg-muted">현물 · TOP {flow.count || 10} 합산</div>
       </div>
-      <div className="space-y-2">
+      <div className="grid grid-cols-3 gap-2">
         {parts.map((p) => {
           const isPos = p.value >= 0;
-          const widthPct = Math.abs(p.value) / maxAbs * 100;
+          const colorCls = isPos ? 'text-up' : 'text-down';
           return (
-            <div key={p.key} className="flex items-center gap-2">
-              <span className="text-xs text-fg-muted w-8 shrink-0">{p.label}</span>
-              <div className="flex-1 h-5 bg-bg-inner rounded relative overflow-hidden">
-                <div
-                  className="absolute top-0 bottom-0 left-1/2 transition-all"
-                  style={{
-                    width: `${widthPct / 2}%`,
-                    background: p.color,
-                    transform: isPos ? 'translateX(0)' : 'translateX(-100%)',
-                    opacity: 0.75,
-                  }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className={`text-xs font-semibold tabular-nums ${isPos ? 'text-up' : 'text-down'}`}>
-                    {isPos ? '+' : ''}{formatKRWCompact(p.value)}
-                  </span>
-                </div>
-                <div className="absolute top-0 bottom-0 left-1/2 w-px bg-border" />
+            <div key={p.key} className="bg-bg-inner rounded-md px-3 py-2 text-center">
+              <div className="text-[11px] text-fg-muted">{p.label}</div>
+              <div className={`text-lg font-bold tabular-nums ${colorCls}`}>
+                {isPos ? '+' : ''}{formatKRWCompact(p.value)}
               </div>
             </div>
           );
@@ -134,14 +122,15 @@ function MarketFlowCard({ label, flow, loading }) {
 
 // ── 30일 수급 히스토리 차트 ───────────────────────────────────────
 function FlowHistoryChart({ label, history, loading }) {
-  // history: [{date, foreign, institution, individual}]
+  // history: [{date, foreign, institution, individual}] — 값은 천원
+  // 1억 = 100,000천원
   const data = useMemo(() => {
-    const UK = 1_0000_0000;
+    const UK_KRW = 100_000; // 1억원을 천원 단위로
     return (history || []).map((r) => ({
       date: r.date?.slice(5) || '',   // "MM-DD"
-      외인: +(r.foreign / UK).toFixed(0),
-      기관: +(r.institution / UK).toFixed(0),
-      개인: +(r.individual / UK).toFixed(0),
+      외인: +(r.foreign / UK_KRW).toFixed(0),
+      기관: +(r.institution / UK_KRW).toFixed(0),
+      개인: +(r.individual / UK_KRW).toFixed(0),
     }));
   }, [history]);
 
