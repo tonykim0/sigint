@@ -162,11 +162,11 @@ def volume_rank(market: str = "ALL") -> list[dict[str, Any]]:
         market.upper(), "0000"
     )
 
-    def _fetch(div_cls: str) -> list[dict[str, Any]]:
+    def _fetch(div_cls: str, mkt: str) -> list[dict[str, Any]]:
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
             "FID_COND_SCR_DIV_CODE": "20171",
-            "FID_INPUT_ISCD": market_code,
+            "FID_INPUT_ISCD": mkt,
             "FID_DIV_CLS_CODE": div_cls,  # 0 전체 / 1 보통주 / 2 우선주
             "FID_BLNG_CLS_CODE": "3",     # 거래금액순
             "FID_TRGT_CLS_CODE": "111111111",
@@ -183,8 +183,16 @@ def volume_rank(market: str = "ALL") -> list[dict[str, Any]]:
         )
         return data.get("output", []) or []
 
-    # 보통주(1) + 우선주(2) 병합 → 30 + 30 = 최대 60개
-    rows = _fetch("1") + _fetch("2")
+    # ALL + KOSPI-only + KOSDAQ-only 보통주/우선주 변형으로 폭 넓게 확보
+    rows: list[dict[str, Any]] = []
+    if market.upper() == "ALL":
+        rows += _fetch("1", "0000")   # 전체 보통주
+        rows += _fetch("2", "0000")   # 전체 우선주
+        rows += _fetch("1", "0001")   # KOSPI 보통주
+        rows += _fetch("1", "1001")   # KOSDAQ 보통주
+    else:
+        rows += _fetch("1", market_code)
+        rows += _fetch("2", market_code)
 
     seen: set[str] = set()
     result: list[dict[str, Any]] = []

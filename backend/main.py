@@ -147,7 +147,7 @@ def api_themes() -> dict:
 @app.get("/api/volume-rank")
 def api_volume_rank(
     market: str = Query("ALL", pattern="^(ALL|KOSPI|KOSDAQ)$"),
-    top_n: int = Query(60, ge=1, le=60),
+    top_n: int = Query(60, ge=1, le=120),
 ) -> dict:
     try:
         items = volume_rank(market=market)

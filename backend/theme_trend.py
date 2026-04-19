@@ -71,16 +71,16 @@ def theme_trend(days: int = 7, force: bool = False) -> dict[str, Any]:
             return _CACHE["data"]
 
     try:
-        rank = volume_rank("ALL")[:60]
+        rank = volume_rank("ALL")
     except KISError as exc:
         raise exc
 
-    # ETF/우선주/100억 미만 제거
+    # ETF/우선주/100억 미만 제거 후 상위 60개
     stocks = [
         r for r in rank
         if not _is_etf(r["name"]) and not _is_preferred(r["name"])
         and r["trade_value"] >= 10_000_000_000
-    ]
+    ][:60]
 
     themes = _load_themes()
     code_map = _code_to_theme(themes)

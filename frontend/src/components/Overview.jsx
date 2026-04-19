@@ -152,6 +152,68 @@ function buildThemesFromAPI(rankItems, codeThemeMap) {
   });
 }
 
+// ── 테마별 1주일 일별 거래대금 스택바 ────────────────────────────
+function ThemeDailyChart({ trend }) {
+  const { chartData, themeKeys } = useMemo(() => {
+    if (!trend?.themes?.length) return { chartData: [], themeKeys: [] };
+    // 모든 날짜 수집
+    const dateSet = new Set();
+    trend.themes.forEach((t) => t.series.forEach((s) => dateSet.add(s.date)));
+    const dates = Array.from(dateSet).sort();
+
+    // 상위 8개 테마만 표시 (나머지는 '기타'로 합산)
+    const topThemes = trend.themes.slice(0, 8);
+    const otherThemes = trend.themes.slice(8);
+
+    const rows = dates.map((date) => {
+      const row = { date: date.slice(5) };
+      topThemes.forEach((t) => {
+        const p = t.series.find((s) => s.date === date);
+        row[t.theme] = p ? +(p.value / 1_0000_0000_0000).toFixed(2) : 0; // 조 단위
+      });
+      if (otherThemes.length > 0) {
+        let sum = 0;
+        otherThemes.forEach((t) => {
+          const p = t.series.find((s) => s.date === date);
+          if (p) sum += p.value;
+        });
+        row['기타'] = +(sum / 1_0000_0000_0000).toFixed(2);
+      }
+      return row;
+    });
+
+    const keys = topThemes.map((t) => ({ name: t.theme, color: t.color }));
+    if (otherThemes.length > 0) keys.push({ name: '기타', color: '#4b5563' });
+    return { chartData: rows, themeKeys: keys };
+  }, [trend]);
+
+  if (!chartData.length) return null;
+
+  return (
+    <div className="mb-4 p-3 rounded-lg bg-bg-inner border border-border">
+      <div className="text-[11px] text-fg-muted font-semibold mb-2">
+        최근 1주일 일별 테마 거래대금 (조원)
+      </div>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 4, left: -10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2228" vertical={false} />
+          <XAxis dataKey="date" tick={{ fill: '#9ca3af', fontSize: 11 }} />
+          <YAxis tick={{ fill: '#9ca3af', fontSize: 10 }} width={50} />
+          <Tooltip
+            contentStyle={{ background: '#0d0f13', border: '1px solid #1e2228', borderRadius: 8, fontSize: 11 }}
+            labelStyle={{ color: '#e5e7eb' }}
+            formatter={(v, name) => [`${v.toFixed(2)}조`, name]}
+          />
+          <Legend wrapperStyle={{ fontSize: 10, paddingTop: 4 }} iconType="rect" iconSize={8} />
+          {themeKeys.map((k) => (
+            <Bar key={k.name} dataKey={k.name} stackId="a" fill={k.color} />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // ── 메인 ──────────────────────────────────────────────────────────
 export default function Overview({ onSelectCode }) {
   const [top, setTop] = useState([]);
@@ -159,7 +221,7 @@ export default function Overview({ onSelectCode }) {
   const [flow, setFlow] = useState(null);
   const [flowLoading, setFlowLoading] = useState(true);
   const [themes, setThemes] = useState({});
-  const [trendMap, setTrendMap] = useState({}); // { theme: {series, change_pct} }
+  const [trendData, setTrendData] = useState(null); // { themes: [{theme, color, series}], days }
   const [loading, setLoading] = useState(true);
   const [indexLoading, setIndexLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -176,7 +238,7 @@ export default function Overview({ onSelectCode }) {
       try {
         const [indexResult, rankData] = await Promise.all([
           api.index(),
-          api.volumeRank({ topN: 60 }),
+          api.volumeRank({ topN: 120 }),
         ]);
         if (cancelled) return;
         setIndexData(indexResult);
@@ -203,9 +265,7 @@ export default function Overview({ onSelectCode }) {
     api.themeTrend(7)
       .then((d) => {
         if (cancelled) return;
-        const m = {};
-        (d.themes || []).forEach((t) => { m[t.theme] = t; });
-        setTrendMap(m);
+        setTrendData(d);
       })
       .catch(() => {});
 
@@ -222,9 +282,11 @@ export default function Overview({ onSelectCode }) {
     return map;
   }, [themes]);
 
-  // 주도 테마는 우선주/100억 미만 추가 제외
+  // 주도 테마는 우선주/100억 미만 추가 제외 + 상위 60개만
   const themeSource = useMemo(
-    () => top.filter((r) => !isPreferred(r.name) && (r.trade_value || 0) >= MIN_TRADE_VALUE),
+    () => top
+      .filter((r) => !isPreferred(r.name) && (r.trade_value || 0) >= MIN_TRADE_VALUE)
+      .slice(0, 60),
     [top],
   );
 
@@ -258,48 +320,14 @@ export default function Overview({ onSelectCode }) {
         title="오늘의 주도 테마"
         subtitle={`${themeSource.length}종목 · ETF · 우선주 · 100억 미만 제외`}
       >
-        {/* 1주일 트렌드 요약 */}
-        {Object.keys(trendMap).length > 0 && (
-          <div className="mb-3 p-3 rounded-lg bg-bg-inner border border-border">
-            <div className="text-[11px] text-fg-muted font-semibold mb-2">
-              1주일 트렌드 (전반 vs 후반 거래대금 변화)
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {Object.values(trendMap)
-                .filter((t) => t.change_pct != null)
-                .sort((a, b) => b.change_pct - a.change_pct)
-                .slice(0, 8)
-                .map((t) => {
-                  const pct = t.change_pct;
-                  return (
-                    <span
-                      key={t.theme}
-                      className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded border ${
-                        pct >= 0
-                          ? 'bg-up/10 text-up border-up/30'
-                          : 'bg-down/10 text-down border-down/30'
-                      }`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: t.color }} />
-                      <span className="font-medium">{t.theme}</span>
-                      <span className="font-bold tabular-nums">
-                        {pct > 0 ? '▲' : '▼'}{Math.min(Math.abs(pct), 999).toFixed(0)}%
-                      </span>
-                    </span>
-                  );
-                })}
-            </div>
-          </div>
-        )}
+        {/* 1주일 일별 테마 거래대금 */}
+        <ThemeDailyChart trend={trendData} />
 
         {themeList.length === 0 ? (
           <div className="text-xs text-fg-muted">{loading ? '조회 중…' : '감지된 테마 없음'}</div>
         ) : (
           <div className="space-y-3">
             {themeList.map((g, i) => {
-              const trend = trendMap[g.theme];
-              const sparkData = trend?.series?.map((s) => ({ date: s.date, value: s.value })) || [];
-              const changePct = trend?.change_pct;
               return (
               <div
                 key={g.theme}
@@ -323,36 +351,6 @@ export default function Overview({ onSelectCode }) {
                       </span>
                     )}
                   </div>
-                  {/* 1주일 스파크라인 */}
-                  {sparkData.length >= 2 && (
-                    <div className="w-32 h-10 shrink-0" title="최근 1주일 거래대금 추이">
-                      <ResponsiveContainer>
-                        <LineChart data={sparkData}>
-                          <Line
-                            type="monotone"
-                            dataKey="value"
-                            stroke={g.color}
-                            strokeWidth={2}
-                            dot={{ r: 2, fill: g.color }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                  {/* 1주일 전반 vs 후반 변화율 */}
-                  {changePct != null && (
-                    <span
-                      className={`px-2 py-0.5 text-[11px] font-semibold tabular-nums shrink-0 rounded border ${
-                        changePct >= 0
-                          ? 'bg-up/15 text-up border-up/40'
-                          : 'bg-down/15 text-down border-down/40'
-                      }`}
-                      title="전반 3~4일 평균 거래대금 대비 후반 3~4일 변화"
-                    >
-                      1주 {changePct > 0 ? '+' : ''}{Math.min(Math.abs(changePct), 999).toFixed(0)}
-                      {Math.abs(changePct) > 999 ? '%+' : '%'}
-                    </span>
-                  )}
                   <span className="text-sm text-accent font-semibold tabular-nums shrink-0">
                     {formatKRWCompact(g.value)}
                   </span>
