@@ -1,22 +1,12 @@
-"""종목명 ↔ 코드 검색.
-
-전략:
-1. 최근 volume_rank 결과를 10분 캐시로 유지 (생거래 종목 우선)
-2. 정적 well-known 목록으로 fallback
-3. 쿼리와 코드/이름 양방향 부분 매치
-"""
+"""종목명 ↔ 코드 검색."""
 from __future__ import annotations
 
-import threading
-import time
 from typing import Any
 
+from cache_utils import TTLCache
 from kis_client import KISError, volume_rank
 
-_RANK_CACHE: list[dict[str, Any]] = []
-_RANK_TS: float = 0.0
-_RANK_LOCK = threading.Lock()
-_RANK_TTL = 600.0  # 10분
+_RANK_CACHE = TTLCache[str, list[dict[str, Any]]](ttl=600.0)
 
 # 자주 등장하는 주요 종목 정적 목록
 WELL_KNOWN: list[dict[str, str]] = [
@@ -94,31 +84,26 @@ WELL_KNOWN: list[dict[str, str]] = [
 _WK_MAP: dict[str, dict[str, str]] = {r["code"]: r for r in WELL_KNOWN}
 
 
-def _refresh_rank() -> None:
-    global _RANK_CACHE, _RANK_TS
+def _load_rank_snapshot() -> list[dict[str, Any]]:
     try:
         items = volume_rank("ALL")[:60]
-        with _RANK_LOCK:
-            _RANK_CACHE = [{"code": r["code"], "name": r["name"]} for r in items]
-            _RANK_TS = time.time()
+        return [{"code": r["code"], "name": r["name"]} for r in items]
     except KISError:
-        pass
+        return []
+
+
+def _rank_snapshot(force: bool = False) -> list[dict[str, Any]]:
+    return _RANK_CACHE.get_or_set("rank", _load_rank_snapshot, force=force)
 
 
 def get_name(code: str) -> str:
-    """code 로 종목명 반환. well-known + 최근 volume_rank 캐시에서 조회."""
     if not code:
         return ""
     if code in _WK_MAP:
         return _WK_MAP[code]["name"]
-    with _RANK_LOCK:
-        for r in _RANK_CACHE:
-            if r["code"] == code:
-                return r["name"]
-        stale = time.time() - _RANK_TS > _RANK_TTL
-    if stale:
-        import threading as _t
-        _t.Thread(target=_refresh_rank, daemon=True).start()
+    for row in _rank_snapshot():
+        if row["code"] == code:
+            return row["name"]
     return ""
 
 
@@ -128,19 +113,10 @@ def search(q: str, limit: int = 10) -> list[dict[str, str]]:
         return []
     ql = q.lower()
 
-    # rank 캐시 갱신 (10분 TTL)
-    with _RANK_LOCK:
-        stale = time.time() - _RANK_TS > _RANK_TTL
-        rank_snap = list(_RANK_CACHE)
-
-    if stale:
-        import threading as _t
-        _t.Thread(target=_refresh_rank, daemon=True).start()
-
-    # 후보 풀: 최근 거래량 상위 + 정적 목록
+    rank_snap = _rank_snapshot()
     pool: dict[str, dict[str, str]] = dict(_WK_MAP)
-    for r in rank_snap:
-        pool[r["code"]] = r
+    for row in rank_snap:
+        pool[row["code"]] = row
 
     results = []
     for item in pool.values():

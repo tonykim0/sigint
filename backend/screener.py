@@ -15,13 +15,12 @@
 """
 from __future__ import annotations
 
-import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
 import analyzers
+from cache_utils import TTLCache
 from kis_client import (
     KISError,
     aggregate_minute_bars,
@@ -30,51 +29,21 @@ from kis_client import (
     index_price,
     inquire_investor,
     minute_chart,
-    volume_rank,
 )
-
-_ETF_PREFIXES = (
-    "KODEX", "TIGER", "KBSTAR", "ACE", "ARIRANG", "HANARO", "KOSEF",
-    "KINDEX", "FOCUS", "SOL", "TIMEFOLIO", "PLUS", "TREX", "RISE",
-)
+from universe import get_trading_universe
 
 
-def _is_etf(name: str) -> bool:
-    n = (name or "").upper()
-    if " ETN" in n:
-        return True
-    return any(n.startswith(p) for p in _ETF_PREFIXES)
+def _filtered_top(limit: int = 60, force: bool = False) -> list[dict[str, Any]]:
+    return get_trading_universe(limit=limit, force=force)
 
 
-def _is_preferred(name: str) -> bool:
-    if not name:
-        return False
-    if name.endswith("우") or name.endswith("우B"):
-        return True
-    return "2우B" in name
+def _filtered_top60(force: bool = False) -> list[dict[str, Any]]:
+    return _filtered_top(60, force=force)
 
-
-def _filtered_top(limit: int = 60) -> list[dict[str, Any]]:
-    """거래대금 탭과 동일한 필터: ETF/우선주/100억미만 제외 후 상위 N개."""
-    rank = volume_rank("ALL")
-    return [
-        r for r in rank
-        if not _is_etf(r["name"])
-        and not _is_preferred(r["name"])
-        and r.get("trade_value", 0) >= 10_000_000_000
-    ][:limit]
-
-
-def _filtered_top60() -> list[dict[str, Any]]:
-    return _filtered_top(60)
-
-_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
-_SWING_CACHE: dict[str, Any] = {"pullback": None, "breakout": None, "ts_pb": 0.0, "ts_br": 0.0}
-_REGIME_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
-_CACHE_TTL = 360.0  # 6분 (워밍업 주기 5분 + 여유)
-_CACHE_LOCK = threading.Lock()
-_SWING_LOCK = threading.Lock()
-_REGIME_LOCK = threading.Lock()
+_CACHE_TTL = 360.0
+_CLOSING_CACHE = TTLCache[str, dict[str, Any]](ttl=_CACHE_TTL)
+_SWING_CACHE = TTLCache[str, dict[str, Any]](ttl=_CACHE_TTL)
+_REGIME_CACHE = TTLCache[str, dict[str, Any]](ttl=_CACHE_TTL)
 
 
 def _evaluate_filters(
@@ -144,68 +113,56 @@ def _fetch_stock_data(code: str) -> dict[str, Any]:
 
 
 def closing_bet(force: bool = False) -> dict[str, Any]:
-    now = time.time()
-    with _CACHE_LOCK:
-        if not force and _CACHE["data"] and now - _CACHE["ts"] < _CACHE_TTL:
-            return _CACHE["data"]
+    def build() -> dict[str, Any]:
+        rank = _filtered_top(30, force=force)
 
-    # 종가배팅은 종목당 3 API call (investor + daily + minute)로 무거움 →
-    # 필터 상위 30종목만 평가 (pullback/breakout 은 60)
-    rank = _filtered_top(30)
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            kospi_f = ex.submit(index_price, "0001")
+            kosdaq_f = ex.submit(index_price, "1001")
+            data_futures = {
+                stock["code"]: ex.submit(_fetch_stock_data, stock["code"])
+                for stock in rank
+            }
 
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        kospi_f = ex.submit(index_price, "0001")
-        kosdaq_f = ex.submit(index_price, "1001")
-        data_futures = {
-            s["code"]: ex.submit(_fetch_stock_data, s["code"]) for s in rank
+            kospi = kospi_f.result()
+            kosdaq = kosdaq_f.result()
+            datas = {code: future.result() for code, future in data_futures.items()}
+
+        stocks: list[dict[str, Any]] = []
+        for stock in rank:
+            data = datas.get(stock["code"], {})
+            filters, pass_count = _evaluate_filters(
+                stock,
+                data.get("investor", []),
+                data.get("daily", []),
+                data.get("minute30", []),
+                kospi["change_rate"],
+            )
+            stocks.append(
+                {
+                    "code": stock["code"],
+                    "name": stock["name"],
+                    "price": stock["price"],
+                    "change_rate": stock["change_rate"],
+                    "volume": stock["volume"],
+                    "trade_value": stock["trade_value"],
+                    "filters": filters,
+                    "pass_count": pass_count,
+                }
+            )
+
+        stocks.sort(key=lambda row: (-row["pass_count"], -row["trade_value"]))
+        return {
+            "stocks": stocks,
+            "index": {
+                "kospi": kospi["change_rate"],
+                "kosdaq": kosdaq["change_rate"],
+            },
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "cached_ttl": _CACHE_TTL,
         }
 
-        kospi = kospi_f.result()
-        kosdaq = kosdaq_f.result()
-        datas = {code: f.result() for code, f in data_futures.items()}
-
-    stocks: list[dict[str, Any]] = []
-    for s in rank:
-        d = datas.get(s["code"], {})
-        filters, pass_count = _evaluate_filters(
-            s,
-            d.get("investor", []),
-            d.get("daily", []),
-            d.get("minute30", []),
-            kospi["change_rate"],
-        )
-        stocks.append(
-            {
-                "code": s["code"],
-                "name": s["name"],
-                "price": s["price"],
-                "change_rate": s["change_rate"],
-                "volume": s["volume"],
-                "trade_value": s["trade_value"],
-                "filters": filters,
-                "pass_count": pass_count,
-            }
-        )
-
-    # pass_count 내림차순 → 거래대금 내림차순
-    stocks.sort(
-        key=lambda r: (-r["pass_count"], -r["trade_value"]),
-    )
-
-    result = {
-        "stocks": stocks,
-        "index": {
-            "kospi": kospi["change_rate"],
-            "kosdaq": kosdaq["change_rate"],
-        },
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "cached_ttl": _CACHE_TTL,
-    }
-
-    with _CACHE_LOCK:
-        _CACHE["data"] = result
-        _CACHE["ts"] = now
-    return result
+    return _CLOSING_CACHE.get_or_set("closing_bet", build, force=force)
 
 
 # ─────────────────────────── 시황 판단 ────────────────────────────
@@ -216,62 +173,55 @@ def market_regime(force: bool = False) -> dict[str, Any]:
     system_on=True → 스윙 스크리너 정상 작동
     system_on=False → 경고 배너 + 스윙 신규 진입 차단 권고
     """
-    now = time.time()
-    with _REGIME_LOCK:
-        if not force and _REGIME_CACHE["data"] and now - _REGIME_CACHE["ts"] < _CACHE_TTL:
-            return _REGIME_CACHE["data"]
+    def build() -> dict[str, Any]:
+        kospi = {}
+        kosdaq = {}
+        kospi_bars: list[dict[str, Any]] = []
+        kosdaq_bars: list[dict[str, Any]] = []
+        try:
+            kospi = index_price("0001")
+        except KISError:
+            pass
+        try:
+            kospi_bars = daily_index_chart("0001", days=30)
+        except KISError:
+            pass
+        try:
+            kosdaq = index_price("1001")
+        except KISError:
+            pass
+        try:
+            kosdaq_bars = daily_index_chart("1001", days=30)
+        except KISError:
+            pass
 
-    kospi = {}
-    kosdaq = {}
-    kospi_bars: list[dict[str, Any]] = []
-    kosdaq_bars: list[dict[str, Any]] = []
-    try:
-        kospi = index_price("0001")
-    except KISError:
-        pass
-    try:
-        kospi_bars = daily_index_chart("0001", days=30)
-    except KISError:
-        pass
-    try:
-        kosdaq = index_price("1001")
-    except KISError:
-        pass
-    try:
-        kosdaq_bars = daily_index_chart("1001", days=30)
-    except KISError:
-        pass
+        def _regime_check(bars: list[dict[str, Any]], idx_price: dict[str, Any]) -> dict[str, Any]:
+            if len(bars) < 20:
+                return {"price": idx_price.get("price"), "ma20": None, "above_ma20": None}
+            from analyzers import _closes, sma
 
-    def _regime_check(bars: list[dict[str, Any]], idx_price: dict[str, Any]) -> dict[str, Any]:
-        if len(bars) < 20:
-            return {"price": idx_price.get("price"), "ma20": None, "above_ma20": None}
-        from analyzers import sma, _closes
-        closes = _closes(bars)
-        ma20 = sma(closes, 20)[-1]
-        price = idx_price.get("price", 0)
+            closes = _closes(bars)
+            ma20 = sma(closes, 20)[-1]
+            price = idx_price.get("price", 0)
+            return {
+                "price": price,
+                "change_rate": idx_price.get("change_rate"),
+                "ma20": round(ma20, 2) if ma20 else None,
+                "above_ma20": bool(price > ma20) if (price and ma20) else None,
+            }
+
+        kospi_regime = _regime_check(kospi_bars, kospi)
+        kosdaq_regime = _regime_check(kosdaq_bars, kosdaq)
         return {
-            "price": price,
-            "change_rate": idx_price.get("change_rate"),
-            "ma20": round(ma20, 2) if ma20 else None,
-            "above_ma20": bool(price > ma20) if (price and ma20) else None,
+            "system_on": bool(
+                kospi_regime.get("above_ma20") or kosdaq_regime.get("above_ma20")
+            ),
+            "kospi": kospi_regime,
+            "kosdaq": kosdaq_regime,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
         }
 
-    kospi_regime = _regime_check(kospi_bars, kospi)
-    kosdaq_regime = _regime_check(kosdaq_bars, kosdaq)
-
-    system_on = bool(
-        kospi_regime.get("above_ma20") or kosdaq_regime.get("above_ma20")
-    )
-    result = {
-        "system_on": system_on,
-        "kospi": kospi_regime,
-        "kosdaq": kosdaq_regime,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    with _REGIME_LOCK:
-        _REGIME_CACHE["data"] = result
-        _REGIME_CACHE["ts"] = now
-    return result
+    return _REGIME_CACHE.get_or_set("market_regime", build, force=force)
 
 
 # ─────────────────────────── 눌림목 스윙 ──────────────────────────
@@ -349,32 +299,25 @@ def _eval_pullback(
 
 
 def pullback_swing(force: bool = False) -> dict[str, Any]:
-    now = time.time()
-    with _SWING_LOCK:
-        if not force and _SWING_CACHE["pullback"] and now - _SWING_CACHE["ts_pb"] < _CACHE_TTL:
-            return _SWING_CACHE["pullback"]
+    def build() -> dict[str, Any]:
+        rank = _filtered_top60(force=force)
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            futures = {stock["code"]: ex.submit(_fetch_daily_only, stock["code"]) for stock in rank}
+            datas = {code: future.result() for code, future in futures.items()}
 
-    rank = _filtered_top60()
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        futures = {s["code"]: ex.submit(_fetch_daily_only, s["code"]) for s in rank}
-        datas = {code: f.result() for code, f in futures.items()}
+        stocks = []
+        for stock in rank:
+            daily = datas.get(stock["code"], [])
+            stocks.append(_eval_pullback(stock, daily))
 
-    stocks = []
-    for s in rank:
-        daily = datas.get(s["code"], [])
-        row = _eval_pullback(s, daily)
-        stocks.append(row)
+        stocks.sort(key=lambda row: (-row["pass_count"], -row["trade_value"]))
+        return {
+            "stocks": stocks,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "cached_ttl": _CACHE_TTL,
+        }
 
-    stocks.sort(key=lambda r: (-r["pass_count"], -r["trade_value"]))
-    result = {
-        "stocks": stocks,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "cached_ttl": _CACHE_TTL,
-    }
-    with _SWING_LOCK:
-        _SWING_CACHE["pullback"] = result
-        _SWING_CACHE["ts_pb"] = now
-    return result
+    return _SWING_CACHE.get_or_set("pullback", build, force=force)
 
 
 # ─────────────────────────── 돌파 스윙 ───────────────────────────
@@ -434,29 +377,22 @@ def _eval_breakout(
 
 
 def breakout_swing(force: bool = False) -> dict[str, Any]:
-    now = time.time()
-    with _SWING_LOCK:
-        if not force and _SWING_CACHE["breakout"] and now - _SWING_CACHE["ts_br"] < _CACHE_TTL:
-            return _SWING_CACHE["breakout"]
+    def build() -> dict[str, Any]:
+        rank = _filtered_top60(force=force)
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            futures = {stock["code"]: ex.submit(_fetch_daily_only, stock["code"]) for stock in rank}
+            datas = {code: future.result() for code, future in futures.items()}
 
-    rank = _filtered_top60()
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        futures = {s["code"]: ex.submit(_fetch_daily_only, s["code"]) for s in rank}
-        datas = {code: f.result() for code, f in futures.items()}
+        stocks = []
+        for stock in rank:
+            daily = datas.get(stock["code"], [])
+            stocks.append(_eval_breakout(stock, daily))
 
-    stocks = []
-    for s in rank:
-        daily = datas.get(s["code"], [])
-        row = _eval_breakout(s, daily)
-        stocks.append(row)
+        stocks.sort(key=lambda row: (-row["pass_count"], -row["trade_value"]))
+        return {
+            "stocks": stocks,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "cached_ttl": _CACHE_TTL,
+        }
 
-    stocks.sort(key=lambda r: (-r["pass_count"], -r["trade_value"]))
-    result = {
-        "stocks": stocks,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "cached_ttl": _CACHE_TTL,
-    }
-    with _SWING_LOCK:
-        _SWING_CACHE["breakout"] = result
-        _SWING_CACHE["ts_br"] = now
-    return result
+    return _SWING_CACHE.get_or_set("breakout", build, force=force)

@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../utils/api.js';
 import {
   changeColor,
-  excludeETF,
   formatChangeRate,
   formatInt,
   formatKRWCompact,
 } from '../utils/format.js';
+import { useScreenerData } from '../hooks/useScreenerData.js';
 import Card from './Card.jsx';
 
 const SUB_TABS = [
@@ -129,46 +129,12 @@ function WeightCalc() {
 }
 
 function ClosingBetTab({ onSelectCode, onGoJournal }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
   const [memos, setMemos] = useState({});
-
-  const load = (force = false) => {
-    setLoading(true);
-    setErr(null);
-    api.screener
-      .closingBet({ force })
-      .then(setData)
-      .catch((e) => setErr(e.message))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadInitial() {
-      try {
-        const result = await api.screener.closingBet({ force: false });
-        if (cancelled) return;
-        setData(result);
-        setErr(null);
-      } catch (e) {
-        if (!cancelled) setErr(e.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void loadInitial();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, loading, err, refresh } = useScreenerData('closing');
 
   const rows = useMemo(() => {
     if (!data?.stocks) return [];
-    return excludeETF(data.stocks).map((s) => {
+    return data.stocks.map((s) => {
       const memo = memos[s.code] || { hasMaterial: false, note: '' };
       const total = s.pass_count + (memo.hasMaterial ? 1 : 0);
       return { ...s, memo, total };
@@ -226,7 +192,7 @@ function ClosingBetTab({ onSelectCode, onGoJournal }) {
             <span className="text-fg-muted">{data.generated_at.slice(11, 19)}</span>
           )}
           <button
-            onClick={() => load(true)}
+            onClick={() => refresh(true)}
             disabled={loading}
             className="px-3 py-1 rounded-md border border-border text-fg-muted hover:text-fg-bright hover:border-accent disabled:opacity-50 text-xs"
           >
@@ -322,46 +288,12 @@ const PB_FILTERS = [
 ];
 
 function PullbackTab({ onSelectCode }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
   const [memos, setMemos] = useState({});
-
-  const load = (force = false) => {
-    setLoading(true);
-    setErr(null);
-    api.screener
-      .pullbackSwing({ force })
-      .then(setData)
-      .catch((e) => setErr(e.message))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadInitial() {
-      try {
-        const result = await api.screener.pullbackSwing({ force: false });
-        if (cancelled) return;
-        setData(result);
-        setErr(null);
-      } catch (e) {
-        if (!cancelled) setErr(e.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void loadInitial();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, loading, err, refresh } = useScreenerData('pullback');
 
   const rows = useMemo(() => {
     if (!data?.stocks) return [];
-    return excludeETF(data.stocks).map((s) => ({
+    return data.stocks.map((s) => ({
       ...s,
       memo: memos[s.code] || { hasMaterial: false, note: '' },
       total: s.pass_count + (memos[s.code]?.hasMaterial ? 1 : 0),
@@ -374,7 +306,7 @@ function PullbackTab({ onSelectCode }) {
         <span className="text-fg-muted">기준봉 출현 후 눌림 구간 매수 타점 탐색</span>
         <div className="ml-auto flex items-center gap-2">
           {data?.generated_at && <span className="text-fg-muted">{data.generated_at.slice(11, 19)}</span>}
-          <button onClick={() => load(true)} disabled={loading}
+          <button onClick={() => refresh(true)} disabled={loading}
             className="px-3 py-1 rounded-md border border-border text-fg-muted hover:text-fg-bright hover:border-accent disabled:opacity-50">
             {loading ? '조회 중…' : '새로고침'}
           </button>
@@ -473,43 +405,8 @@ const BO_FILTERS = [
 ];
 
 function BreakoutTab({ onSelectCode }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
-
-  const load = (force = false) => {
-    setLoading(true);
-    setErr(null);
-    api.screener
-      .breakoutSwing({ force })
-      .then(setData)
-      .catch((e) => setErr(e.message))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadInitial() {
-      try {
-        const result = await api.screener.breakoutSwing({ force: false });
-        if (cancelled) return;
-        setData(result);
-        setErr(null);
-      } catch (e) {
-        if (!cancelled) setErr(e.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void loadInitial();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const rows = excludeETF(data?.stocks || []);
+  const { data, loading, err, refresh } = useScreenerData('breakout');
+  const rows = data?.stocks || [];
 
   return (
     <div>
@@ -517,7 +414,7 @@ function BreakoutTab({ onSelectCode }) {
         <span className="text-fg-muted">전고점 돌파 + 추세 적격 종목 탐색 (미너비니 기반)</span>
         <div className="ml-auto flex items-center gap-2">
           {data?.generated_at && <span className="text-fg-muted">{data.generated_at.slice(11, 19)}</span>}
-          <button onClick={() => load(true)} disabled={loading}
+          <button onClick={() => refresh(true)} disabled={loading}
             className="px-3 py-1 rounded-md border border-border text-fg-muted hover:text-fg-bright hover:border-accent disabled:opacity-50">
             {loading ? '조회 중…' : '새로고침'}
           </button>
@@ -592,14 +489,7 @@ function BreakoutTab({ onSelectCode }) {
 
 export default function Screener({ onSelectCode, onGoJournal }) {
   const [subTab, setSubTab] = useState('closing');
-  const [regime, setRegime] = useState(null);
-
-  useEffect(() => {
-    api.screener
-      .marketRegime()
-      .then(setRegime)
-      .catch(() => {});
-  }, []);
+  const { data: regime } = useScreenerData('regime');
 
   return (
     <Card

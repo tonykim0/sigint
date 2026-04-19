@@ -14,6 +14,7 @@ import {
   formatInt,
   formatKRWCompact,
 } from '../utils/format.js';
+import { useChartAnalysisData } from '../hooks/useChartAnalysisData.js';
 import Card from './Card.jsx';
 
 const CHART_OPTIONS = {
@@ -307,62 +308,6 @@ function IndicatorsPanel({ summary }) {
   );
 }
 
-function SearchBox({ onSelect }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [open, setOpen] = useState(false);
-  const timerRef = useRef(null);
-  const boxRef = useRef(null);
-
-  useEffect(() => {
-    const handleClick = (e) => { if (!boxRef.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  const handleChange = (v) => {
-    setQuery(v);
-    clearTimeout(timerRef.current);
-    if (!v.trim()) { setResults([]); setOpen(false); return; }
-    timerRef.current = setTimeout(() => {
-      api.search(v.trim())
-        .then((d) => { setResults(d.results || []); setOpen(true); })
-        .catch(() => {});
-    }, 200);
-  };
-
-  const select = (item) => {
-    setQuery('');
-    setResults([]);
-    setOpen(false);
-    onSelect(item.code, item.name);
-  };
-
-  return (
-    <div ref={boxRef} className="relative">
-      <input
-        value={query}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder="종목명 검색"
-        className="bg-bg-inner border border-border rounded-md px-3 py-2 text-sm text-fg-white w-36 focus:outline-none focus:border-accent placeholder:text-fg-muted/50"
-      />
-      {open && results.length > 0 && (
-        <div className="absolute top-full left-0 mt-1 w-52 bg-bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
-          {results.map((r) => (
-            <button
-              key={r.code}
-              onClick={() => select(r)}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-inner transition-colors"
-            >
-              <span className="text-fg-muted text-[11px] tabular-nums w-14">{r.code}</span>
-              <span className="text-fg-white text-sm">{r.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const TIMEFRAMES = [
   { id: 'D', label: '일봉' },
@@ -374,74 +319,21 @@ const TIMEFRAMES = [
 ];
 
 export default function ChartAnalysis({ initialCode }) {
-  const seedCode = initialCode || '005930';
-  const [input, setInput] = useState(seedCode);
-  const [code, setCode] = useState(seedCode);
-  const [timeframe, setTimeframe] = useState('D');
-  const [requestKey, setRequestKey] = useState(0);
-  const [price, setPrice] = useState(null);
-  const [chart, setChart] = useState(null);
-  const [minuteBars, setMinuteBars] = useState(null);
-  const [patterns, setPatterns] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
-
-  const isIntraday = timeframe !== 'D';
-
-  function submitCode(nextValue = input) {
-    const normalized = nextValue.replace(/\D/g, '').slice(0, 6);
-    setInput(normalized);
-    if (!/^\d{6}$/.test(normalized)) {
-      setErr('종목코드 6자리를 입력하세요.');
-      return;
-    }
-    setLoading(true);
-    setErr(null);
-    setMinuteBars(null);
-    setPatterns(null);
-    setCode(normalized);
-    setRequestKey((key) => key + 1);
-  }
-
-  function selectTimeframe(nextTimeframe) {
-    setTimeframe(nextTimeframe);
-    if (nextTimeframe !== 'D') {
-      setMinuteBars(null);
-    }
-  }
-
-  useEffect(() => {
-    if (!/^\d{6}$/.test(code)) return;
-    let cancelled = false;
-
-    // 통합 엔드포인트: price + chart + 패턴 4개를 한 번에
-    api.chartAnalysis(code, { days: 120 })
-      .then((d) => {
-        if (cancelled) return;
-        setPrice(d.price || null);
-        setChart(d.chart || null);
-        setPatterns(d.patterns || null);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setPrice(null);
-        setChart(null);
-        setPatterns(null);
-        setErr(e.message);
-      })
-      .finally(() => !cancelled && setLoading(false));
-    return () => { cancelled = true; };
-  }, [code, requestKey]);
-
-  // 분봉 데이터 로드 (timeframe 변경 시)
-  useEffect(() => {
-    if (!/^\d{6}$/.test(code) || !isIntraday) return;
-    let cancelled = false;
-    api.minuteChart(code, { timeUnit: parseInt(timeframe, 10) })
-      .then((d) => { if (!cancelled) setMinuteBars(d.bars || []); })
-      .catch(() => { if (!cancelled) setMinuteBars([]); });
-    return () => { cancelled = true; };
-  }, [code, timeframe, isIntraday, requestKey]);
+  const {
+    input,
+    setInput,
+    code,
+    timeframe,
+    price,
+    chart,
+    minuteBars,
+    patterns,
+    loading,
+    err,
+    isIntraday,
+    submitCode,
+    selectTimeframe,
+  } = useChartAnalysisData(initialCode);
 
   const analysis = chart?.analysis;
   const dailyBars = chart?.bars;
@@ -454,42 +346,95 @@ export default function ChartAnalysis({ initialCode }) {
     <div className="space-y-4">
       <Card>
         <div className="flex items-start gap-3 flex-wrap">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            onKeyDown={(e) => e.key === 'Enter' && submitCode(input)}
-            placeholder="코드 6자리"
-            className="bg-bg-inner border border-border rounded-md px-3 py-2 text-sm text-fg-white w-32 focus:outline-none focus:border-accent tabular-nums"
-          />
-          <button
-            onClick={() => submitCode(input)}
-            className="px-3 py-2 text-sm rounded-md bg-accent/15 border border-accent text-accent hover:bg-accent/25"
-          >
-            조회
-          </button>
-          <SearchBox onSelect={(nextCode) => submitCode(nextCode)} />
-          {loading && <span className="text-xs text-fg-muted self-center">불러오는 중…</span>}
-          {err && <span className="text-xs text-warn self-center">{err}</span>}
-          <div className="ml-auto text-right">
-            {price && (
+          {/* 좌측: 종목 정보 */}
+          <div className="flex-1 min-w-0">
+            {price ? (
               <>
-                <div className="flex items-baseline gap-2 justify-end">
-                  <span className="text-xl font-bold text-fg-white">{price.name || '—'}</span>
-                  <span className="text-xs text-fg-muted tabular-nums">{code}</span>
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-2xl font-bold text-fg-white">{price.name || '—'}</span>
+                  <span className="text-sm text-fg-muted tabular-nums">{code}</span>
                 </div>
-                <div className="text-[11px] text-fg-muted">
+                <div className="text-[11px] text-fg-muted mt-0.5">
                   {price.market}{price.sector ? ` · ${price.sector}` : ''}
                 </div>
-                <div className="mt-1 text-3xl font-bold text-fg-white tabular-nums">
+                <div className="mt-2 text-3xl font-bold text-fg-white tabular-nums">
                   {formatInt(price.price)}
-                  <span className={`ml-3 text-sm ${changeColor(price.change_rate)}`}>
+                  <span className={`ml-3 text-base ${changeColor(price.change_rate)}`}>
                     {price.prev_diff > 0 ? '▲' : price.prev_diff < 0 ? '▼' : ''}
                     {formatInt(Math.abs(price.prev_diff))}{' '}
                     ({formatChangeRate(price.change_rate)})
                   </span>
                 </div>
+                {/* 외부 링크: 뉴스/공시/네이버 금융 */}
+                <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+                  <a
+                    href={`https://finance.naver.com/item/main.naver?code=${code}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded border border-border text-fg-muted hover:text-fg-bright hover:border-accent transition-colors"
+                    title="네이버 금융: 기업개요/재무/실적"
+                  >
+                    🏢 기업개요 (네이버)
+                  </a>
+                  <a
+                    href={`https://finance.naver.com/item/news.naver?code=${code}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded border border-border text-fg-muted hover:text-fg-bright hover:border-accent transition-colors"
+                    title="종목 관련 뉴스"
+                  >
+                    📰 뉴스
+                  </a>
+                  <a
+                    href={`https://finance.naver.com/item/coinfo.naver?code=${code}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded border border-border text-fg-muted hover:text-fg-bright hover:border-accent transition-colors"
+                    title="재무제표/실적"
+                  >
+                    📊 재무/실적
+                  </a>
+                  <a
+                    href={`https://dart.fss.or.kr/dsab007/detail.do?rcpNo=&selectKey=${code}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded border border-border text-fg-muted hover:text-fg-bright hover:border-accent transition-colors"
+                    title="전자공시 시스템"
+                  >
+                    📋 공시 (DART)
+                  </a>
+                  <a
+                    href={`https://alphasquare.co.kr/home/stock-detail/${code}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded border border-border text-fg-muted hover:text-fg-bright hover:border-accent transition-colors"
+                    title="알파스퀘어 상세 분석"
+                  >
+                    🔎 알파스퀘어
+                  </a>
+                </div>
               </>
+            ) : (
+              <div className="text-fg-muted text-sm">{loading ? '불러오는 중…' : '—'}</div>
             )}
+          </div>
+
+          {/* 우측: 코드 입력 */}
+          <div className="flex items-center gap-2 shrink-0">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={(e) => e.key === 'Enter' && submitCode(input)}
+              placeholder="코드 6자리"
+              className="bg-bg-inner border border-border rounded-md px-3 py-2 text-sm text-fg-white w-32 focus:outline-none focus:border-accent tabular-nums"
+            />
+            <button
+              onClick={() => submitCode(input)}
+              className="px-3 py-2 text-sm rounded-md bg-accent/15 border border-accent text-accent hover:bg-accent/25"
+            >
+              조회
+            </button>
+            {err && <span className="text-xs text-warn">{err}</span>}
           </div>
         </div>
 

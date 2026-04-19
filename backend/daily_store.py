@@ -1,28 +1,31 @@
-"""거래대금 TOP 60 일일 저장/조회.
-
-파일: backend/data/daily/{YYYYMMDD}.json
-구조: {"date": "20260419", "saved_at": iso, "items": [...]}
-"""
+"""Daily trading-universe snapshots backed by SQLite."""
 from __future__ import annotations
 
 import json
-import threading
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-from kis_client import KISError, volume_rank
-
-DATA_DIR = Path(__file__).parent / "data" / "daily"
-_LOCK = threading.Lock()
+from db import decode_items_json, get_connection, initialize_db
+from universe import get_trading_universe
 
 
 def _today_ymd() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
+def _row_to_snapshot(row) -> dict[str, Any]:
+    return {
+        "date": row["date"],
+        "market": row["market"],
+        "saved_at": row["saved_at"],
+        "count": row["count"],
+        "items": decode_items_json(row["items_json"]),
+    }
+
+
 def save_today(market: str = "ALL", top_n: int = 60) -> dict[str, Any]:
-    items = volume_rank(market=market)[:top_n]
+    initialize_db()
+    items = get_trading_universe(market=market, limit=top_n, force=True)
     payload = {
         "date": _today_ymd(),
         "market": market,
@@ -30,63 +33,90 @@ def save_today(market: str = "ALL", top_n: int = 60) -> dict[str, Any]:
         "count": len(items),
         "items": items,
     }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    path = DATA_DIR / f"{payload['date']}.json"
-    with _LOCK:
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO daily_snapshots (
+                date, market, saved_at, count, items_json
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                payload["date"],
+                payload["market"],
+                payload["saved_at"],
+                payload["count"],
+                json.dumps(payload["items"], ensure_ascii=False),
+            ),
+        )
     return payload
 
 
-def load_by_date(date: str) -> dict[str, Any] | None:
-    path = DATA_DIR / f"{date}.json"
-    if not path.exists():
-        return None
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
+def load_by_date(date: str, market: str = "ALL") -> dict[str, Any] | None:
+    initialize_db()
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM daily_snapshots
+            WHERE date = ? AND market = ?
+            """,
+            (date, market),
+        ).fetchone()
+    return _row_to_snapshot(row) if row else None
 
 
 def list_dates() -> list[str]:
-    if not DATA_DIR.exists():
-        return []
-    return sorted(
-        p.stem for p in DATA_DIR.glob("*.json") if p.stem.isdigit()
-    )
+    initialize_db()
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT date FROM daily_snapshots ORDER BY date"
+        ).fetchall()
+    return [row["date"] for row in rows]
 
 
-def compare(d1: str, d2: str) -> dict[str, Any]:
-    """두 날짜 데이터 비교 - 신규 진입, 이탈, 랭크 변화."""
-    a = load_by_date(d1)
-    b = load_by_date(d2)
+def list_snapshots() -> list[dict[str, Any]]:
+    initialize_db()
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT date, market, saved_at, count
+            FROM daily_snapshots
+            ORDER BY date DESC, market ASC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def compare(d1: str, d2: str, market: str = "ALL") -> dict[str, Any]:
+    a = load_by_date(d1, market=market)
+    b = load_by_date(d2, market=market)
     if not a or not b:
-        return {"error": "file not found", "d1": bool(a), "d2": bool(b)}
+        return {"error": "file not found", "d1": bool(a), "d2": bool(b), "market": market}
 
-    a_map = {x["code"]: (i + 1, x) for i, x in enumerate(a["items"])}
-    b_map = {x["code"]: (i + 1, x) for i, x in enumerate(b["items"])}
+    a_map = {item["code"]: (idx + 1, item) for idx, item in enumerate(a["items"])}
+    b_map = {item["code"]: (idx + 1, item) for idx, item in enumerate(b["items"])}
 
-    new_entries = [b_map[c][1] for c in b_map if c not in a_map]
-    dropped = [a_map[c][1] for c in a_map if c not in b_map]
+    new_entries = [b_map[code][1] for code in b_map if code not in a_map]
+    dropped = [a_map[code][1] for code in a_map if code not in b_map]
 
     rank_changes = []
-    for c, (b_rank, b_item) in b_map.items():
-        if c in a_map:
-            a_rank = a_map[c][0]
-            rank_changes.append(
-                {
-                    **b_item,
-                    "prev_rank": a_rank,
-                    "curr_rank": b_rank,
-                    "delta": a_rank - b_rank,  # 양수=상승
-                }
-            )
-    rank_changes.sort(key=lambda r: -abs(r["delta"]))
+    for code, (b_rank, b_item) in b_map.items():
+        if code not in a_map:
+            continue
+        a_rank = a_map[code][0]
+        rank_changes.append(
+            {
+                **b_item,
+                "prev_rank": a_rank,
+                "curr_rank": b_rank,
+                "delta": a_rank - b_rank,
+            }
+        )
+    rank_changes.sort(key=lambda row: -abs(row["delta"]))
 
     return {
         "d1": d1,
         "d2": d2,
+        "market": market,
         "new_entries": new_entries,
         "dropped": dropped,
         "rank_changes": rank_changes[:20],

@@ -1,26 +1,13 @@
-"""매매일지 저장/조회/통계/추적.
-
-데이터: backend/data/journal.json  (리스트[entry])
-entry schema:
-  id, code, name, entry_date, entry_price, reason, weight_pct, memo,
-  exit_date, exit_price,
-  created_at, updated_at,
-  tracking: { d3, d5, d10 },     # 각 거래일의 종가
-  category: '추세형' | '단발형' | '눌림형' | null
-"""
+"""Trade journal persistence backed by SQLite."""
 from __future__ import annotations
 
 import json
-import threading
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
+from db import get_connection, initialize_db
 from kis_client import KISError, daily_chart
-
-DATA_FILE = Path(__file__).parent / "data" / "journal.json"
-_LOCK = threading.Lock()
 
 VALID_REASONS = {"closing_bet", "breakout", "pullback"}
 
@@ -30,36 +17,79 @@ def _normalize_reason(value: Any) -> str:
     return reason if reason in VALID_REASONS else "closing_bet"
 
 
-def _read_all() -> list[dict[str, Any]]:
-    if not DATA_FILE.exists():
-        return []
+def _row_to_entry(row) -> dict[str, Any]:
+    tracking_raw = row["tracking_json"] if row["tracking_json"] else "{}"
     try:
-        with DATA_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
-        return []
+        tracking = json.loads(tracking_raw)
+    except json.JSONDecodeError:
+        tracking = {"d1": None, "d3": None, "d5": None, "d10": None}
+    return {
+        "id": row["id"],
+        "code": row["code"],
+        "name": row["name"],
+        "entry_date": row["entry_date"],
+        "entry_price": row["entry_price"],
+        "reason": row["reason"],
+        "weight_pct": row["weight_pct"],
+        "memo": row["memo"],
+        "exit_date": row["exit_date"],
+        "exit_price": row["exit_price"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "tracking": tracking,
+        "category": row["category"],
+    }
 
 
-def _write_all(entries: list[dict[str, Any]]) -> None:
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = DATA_FILE.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(entries, f, ensure_ascii=False, indent=2)
-    tmp.replace(DATA_FILE)
+def _persist_entry(entry: dict[str, Any]) -> None:
+    initialize_db()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO journal_entries (
+                id, code, name, entry_date, entry_price, reason, weight_pct, memo,
+                exit_date, exit_price, created_at, updated_at, tracking_json, category
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry["id"],
+                entry["code"],
+                entry.get("name", ""),
+                entry["entry_date"],
+                float(entry["entry_price"]),
+                _normalize_reason(entry.get("reason")),
+                float(entry.get("weight_pct", 0) or 0),
+                entry.get("memo", ""),
+                entry.get("exit_date"),
+                entry.get("exit_price"),
+                entry["created_at"],
+                entry["updated_at"],
+                json.dumps(entry.get("tracking") or {}, ensure_ascii=False),
+                entry.get("category"),
+            ),
+        )
 
 
 def list_entries() -> list[dict[str, Any]]:
-    with _LOCK:
-        return _read_all()
+    initialize_db()
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM journal_entries
+            ORDER BY entry_date DESC, created_at DESC
+            """
+        ).fetchall()
+    return [_row_to_entry(row) for row in rows]
 
 
 def get_entry(entry_id: str) -> Optional[dict[str, Any]]:
-    with _LOCK:
-        for e in _read_all():
-            if e["id"] == entry_id:
-                return e
-    return None
+    initialize_db()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM journal_entries WHERE id = ?",
+            (entry_id,),
+        ).fetchone()
+    return _row_to_entry(row) if row else None
 
 
 def add_entry(payload: dict[str, Any]) -> dict[str, Any]:
@@ -68,12 +98,12 @@ def add_entry(payload: dict[str, Any]) -> dict[str, Any]:
         "id": str(uuid.uuid4()),
         "code": str(payload["code"]).zfill(6),
         "name": payload.get("name", ""),
-        "entry_date": payload["entry_date"],
+        "entry_date": str(payload["entry_date"]),
         "entry_price": float(payload["entry_price"]),
         "reason": _normalize_reason(payload.get("reason")),
         "weight_pct": float(payload.get("weight_pct", 0) or 0),
         "memo": payload.get("memo", ""),
-        "exit_date": payload.get("exit_date"),
+        "exit_date": str(payload["exit_date"]) if payload.get("exit_date") else None,
         "exit_price": float(payload["exit_price"])
         if payload.get("exit_price") not in (None, "", 0)
         else None,
@@ -82,51 +112,45 @@ def add_entry(payload: dict[str, Any]) -> dict[str, Any]:
         "tracking": {"d1": None, "d3": None, "d5": None, "d10": None},
         "category": None,
     }
-    with _LOCK:
-        entries = _read_all()
-        entries.append(entry)
-        _write_all(entries)
+    _persist_entry(entry)
     return entry
 
 
 def update_entry(entry_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-    with _LOCK:
-        entries = _read_all()
-        for e in entries:
-            if e["id"] != entry_id:
-                continue
-            for k in ("name", "memo", "exit_date"):
-                if k in patch:
-                    e[k] = patch[k]
-            if "reason" in patch:
-                e["reason"] = _normalize_reason(patch["reason"])
-            if "weight_pct" in patch and patch["weight_pct"] is not None:
-                e["weight_pct"] = float(patch["weight_pct"])
-            if "entry_price" in patch and patch["entry_price"] is not None:
-                e["entry_price"] = float(patch["entry_price"])
-            if "exit_price" in patch:
-                v = patch["exit_price"]
-                e["exit_price"] = float(v) if v not in (None, "", 0) else None
-            if "entry_date" in patch and patch["entry_date"]:
-                e["entry_date"] = patch["entry_date"]
-            e["updated_at"] = datetime.now().isoformat(timespec="seconds")
-            _write_all(entries)
-            return e
-    return None
+    entry = get_entry(entry_id)
+    if entry is None:
+        return None
+
+    for key in ("name", "memo"):
+        if key in patch:
+            entry[key] = patch[key]
+    if "entry_date" in patch and patch["entry_date"]:
+        entry["entry_date"] = str(patch["entry_date"])
+    if "exit_date" in patch:
+        entry["exit_date"] = str(patch["exit_date"]) if patch["exit_date"] else None
+    if "reason" in patch:
+        entry["reason"] = _normalize_reason(patch["reason"])
+    if "weight_pct" in patch and patch["weight_pct"] is not None:
+        entry["weight_pct"] = float(patch["weight_pct"])
+    if "entry_price" in patch and patch["entry_price"] is not None:
+        entry["entry_price"] = float(patch["entry_price"])
+    if "exit_price" in patch:
+        value = patch["exit_price"]
+        entry["exit_price"] = float(value) if value not in (None, "", 0) else None
+    entry["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    _persist_entry(entry)
+    return entry
 
 
 def delete_entry(entry_id: str) -> bool:
-    with _LOCK:
-        entries = _read_all()
-        new = [e for e in entries if e["id"] != entry_id]
-        if len(new) == len(entries):
-            return False
-        _write_all(new)
-        return True
+    initialize_db()
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
+    return cur.rowcount > 0
 
 
-def _classify(entry_price: float, t: dict[str, Any]) -> Optional[str]:
-    d3, d5, d10 = t.get("d3"), t.get("d5"), t.get("d10")
+def _classify(entry_price: float, tracking: dict[str, Any]) -> Optional[str]:
+    d3, d5, d10 = tracking.get("d3"), tracking.get("d5"), tracking.get("d10")
     if d10 is None:
         return None
     if d10 > entry_price and d3 is not None and d3 >= entry_price:
@@ -139,7 +163,6 @@ def _classify(entry_price: float, t: dict[str, Any]) -> Optional[str]:
 
 
 def refresh_tracking(entry_id: str) -> Optional[dict[str, Any]]:
-    """entry_date 이후 N거래일차 종가를 daily_chart 에서 채움."""
     entry = get_entry(entry_id)
     if entry is None:
         return None
@@ -148,8 +171,8 @@ def refresh_tracking(entry_id: str) -> Optional[dict[str, Any]]:
     except KISError:
         return entry
 
-    after = [b for b in bars if b.get("date", "") > entry["entry_date"]]
-    after.sort(key=lambda b: b["date"])
+    after = [bar for bar in bars if bar.get("date", "") > entry["entry_date"]]
+    after.sort(key=lambda bar: bar["date"])
 
     def pick(n: int) -> Optional[float]:
         return after[n - 1]["close"] if len(after) >= n else None
@@ -160,57 +183,53 @@ def refresh_tracking(entry_id: str) -> Optional[dict[str, Any]]:
         "d5": pick(5),
         "d10": pick(10),
     }
-    category = _classify(entry["entry_price"], tracking)
-
-    with _LOCK:
-        entries = _read_all()
-        for e in entries:
-            if e["id"] == entry_id:
-                e["tracking"] = tracking
-                e["category"] = category
-                e["updated_at"] = datetime.now().isoformat(timespec="seconds")
-                _write_all(entries)
-                return e
-    return None
+    entry["tracking"] = tracking
+    entry["category"] = _classify(entry["entry_price"], tracking)
+    entry["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    _persist_entry(entry)
+    return entry
 
 
 def stats() -> dict[str, Any]:
     entries = list_entries()
     total = len(entries)
-    closed = [e for e in entries if e.get("exit_price")]
+    closed = [entry for entry in entries if entry.get("exit_price")]
     closed_count = len(closed)
 
-    def ret(e: dict[str, Any]) -> float:
-        return (e["exit_price"] - e["entry_price"]) / e["entry_price"] * 100
+    def ret(entry: dict[str, Any]) -> float:
+        return (entry["exit_price"] - entry["entry_price"]) / entry["entry_price"] * 100
 
-    wins = [e for e in closed if ret(e) > 0]
-    losses = [e for e in closed if ret(e) <= 0]
-    win_sum = sum(ret(e) for e in wins)
-    loss_sum = sum(ret(e) for e in losses)  # 음수
+    wins = [entry for entry in closed if ret(entry) > 0]
+    losses = [entry for entry in closed if ret(entry) <= 0]
+    win_sum = sum(ret(entry) for entry in wins)
+    loss_sum = sum(ret(entry) for entry in losses)
 
     by_reason: dict[str, dict[str, Any]] = {}
-    for e in closed:
-        r = e.get("reason", "closing_bet")
-        b = by_reason.setdefault(r, {"count": 0, "wins": 0, "avg_return": 0.0})
-        b["count"] += 1
-        if ret(e) > 0:
-            b["wins"] += 1
-        b["avg_return"] += ret(e)
-    for b in by_reason.values():
-        if b["count"]:
-            b["avg_return"] = round(b["avg_return"] / b["count"], 2)
-            b["win_rate"] = round(b["wins"] / b["count"] * 100, 1)
+    for entry in closed:
+        reason = entry.get("reason", "closing_bet")
+        bucket = by_reason.setdefault(reason, {"count": 0, "wins": 0, "avg_return": 0.0})
+        bucket["count"] += 1
+        if ret(entry) > 0:
+            bucket["wins"] += 1
+        bucket["avg_return"] += ret(entry)
+    for bucket in by_reason.values():
+        if bucket["count"]:
+            bucket["avg_return"] = round(bucket["avg_return"] / bucket["count"], 2)
+            bucket["win_rate"] = round(bucket["wins"] / bucket["count"] * 100, 1)
 
-    # 연속 승/패
-    sorted_closed = sorted(closed, key=lambda e: e.get("exit_date") or "")
+    sorted_closed = sorted(closed, key=lambda entry: entry.get("exit_date") or "")
     max_cons_wins = max_cons_losses = cur_w = cur_l = 0
-    for e in sorted_closed:
-        if ret(e) > 0:
-            cur_w += 1; cur_l = 0
-            if cur_w > max_cons_wins: max_cons_wins = cur_w
+    for entry in sorted_closed:
+        if ret(entry) > 0:
+            cur_w += 1
+            cur_l = 0
+            if cur_w > max_cons_wins:
+                max_cons_wins = cur_w
         else:
-            cur_l += 1; cur_w = 0
-            if cur_l > max_cons_losses: max_cons_losses = cur_l
+            cur_l += 1
+            cur_w = 0
+            if cur_l > max_cons_losses:
+                max_cons_losses = cur_l
 
     return {
         "total_count": total,
@@ -219,9 +238,7 @@ def stats() -> dict[str, Any]:
         "win_count": len(wins),
         "loss_count": len(losses),
         "win_rate": round(len(wins) / closed_count * 100, 1) if closed_count else 0,
-        "avg_return_pct": round(
-            sum(ret(e) for e in closed) / closed_count, 2
-        )
+        "avg_return_pct": round(sum(ret(entry) for entry in closed) / closed_count, 2)
         if closed_count
         else 0,
         "max_consecutive_wins": max_cons_wins,

@@ -23,6 +23,10 @@ export const api = {
   health: () => getJSON('/api/health'),
   volumeRank: ({ market = 'ALL', topN = 60 } = {}) =>
     getJSON(`/api/volume-rank?market=${market}&top_n=${topN}`),
+  tradingUniverse: ({ market = 'ALL', limit = 60, force = false } = {}) =>
+    getJSON(
+      `/api/trading-universe?market=${market}&limit=${limit}${force ? '&force=true' : ''}`,
+    ),
   price: (code) => getJSON(`/api/price/${code}`),
   chart: (code, { days = 180, indicators = true } = {}) =>
     getJSON(
@@ -34,7 +38,8 @@ export const api = {
   minuteChart: (code, { timeUnit = 1 } = {}) =>
     getJSON(`/api/minute-chart/${code}?time_unit=${timeUnit}`),
   index: () => getJSON('/api/index'),
-  investorSummary: (topN = 10) => getJSON(`/api/investor-summary?top_n=${topN}`),
+  investorSummary: ({ topN = 10, force = false } = {}) =>
+    getJSON(`/api/investor-summary?top_n=${topN}${force ? '&force=true' : ''}`),
   marketFlow: () => getJSON('/api/market-flow'),
   search: (q) => getJSON(`/api/search?q=${encodeURIComponent(q)}`),
   themes: () => getJSON('/api/themes'),
@@ -71,7 +76,9 @@ export const api = {
     save: (market = 'ALL') =>
       request(`/api/daily-save?market=${market}`, { method: 'POST' }),
     list: () => getJSON('/api/daily-history'),
-    byDate: (date) => getJSON(`/api/daily-history?date=${date}`),
-    compare: (d1, d2) => getJSON(`/api/daily-history/compare?d1=${d1}&d2=${d2}`),
+    byDate: (date, market = 'ALL') =>
+      getJSON(`/api/daily-history?date=${date}&market=${market}`),
+    compare: (d1, d2, market = 'ALL') =>
+      getJSON(`/api/daily-history/compare?d1=${d1}&d2=${d2}&market=${market}`),
   },
 };

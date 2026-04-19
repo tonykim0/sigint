@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Bar,
   BarChart,
@@ -12,17 +12,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { api } from '../utils/api.js';
 import {
   changeColor,
-  excludeETF,
   formatChangeRate,
   formatInt,
   formatKRWCompact,
-  isPreferred,
 } from '../utils/format.js';
-
-const MIN_TRADE_VALUE = 10_000_000_000; // 100억
+import { useOverviewData } from '../hooks/useOverviewData.js';
 import Card from './Card.jsx';
 
 // KIS 투자자 값: 백만원 → 원
@@ -216,61 +212,18 @@ function ThemeDailyChart({ trend }) {
 
 // ── 메인 ──────────────────────────────────────────────────────────
 export default function Overview({ onSelectCode }) {
-  const [top, setTop] = useState([]);
-  const [indexData, setIndexData] = useState(null);
-  const [flow, setFlow] = useState(null);
-  const [flowLoading, setFlowLoading] = useState(true);
-  const [themes, setThemes] = useState({});
-  const [trendData, setTrendData] = useState(null); // { themes: [{theme, color, series}], days }
-  const [loading, setLoading] = useState(true);
-  const [indexLoading, setIndexLoading] = useState(true);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    // 테마 맵 로드
-    api.themes().then((d) => setThemes(d.themes || {})).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadOverview() {
-      try {
-        const [indexResult, rankData] = await Promise.all([
-          api.index(),
-          api.volumeRank({ topN: 120 }),
-        ]);
-        if (cancelled) return;
-        setIndexData(indexResult);
-        setTop(excludeETF(rankData.items));
-        setErr(null);
-      } catch (e) {
-        if (!cancelled) setErr(e.message);
-      } finally {
-        if (!cancelled) {
-          setIndexLoading(false);
-          setLoading(false);
-        }
-      }
-    }
-
-    void loadOverview();
-
-    // 시장 수급 — 병렬, 10초 정도 걸릴 수 있으므로 별도 로딩
-    api.marketFlow()
-      .then((d) => { if (!cancelled) { setFlow(d); setFlowLoading(false); } })
-      .catch(() => { if (!cancelled) setFlowLoading(false); });
-
-    // 테마 트렌드 (1주일) — 백그라운드
-    api.themeTrend(7)
-      .then((d) => {
-        if (cancelled) return;
-        setTrendData(d);
-      })
-      .catch(() => {});
-
-    return () => { cancelled = true; };
-  }, []);
+  const {
+    indexData,
+    flow,
+    flowLoading,
+    themes,
+    trendData,
+    universeItems,
+    universeFilters,
+    loading,
+    indexLoading,
+    err,
+  } = useOverviewData();
 
   const codeThemeMap = useMemo(() => {
     const map = {};
@@ -282,18 +235,19 @@ export default function Overview({ onSelectCode }) {
     return map;
   }, [themes]);
 
-  // 주도 테마는 우선주/100억 미만 추가 제외 + 상위 60개만
-  const themeSource = useMemo(
-    () => top
-      .filter((r) => !isPreferred(r.name) && (r.trade_value || 0) >= MIN_TRADE_VALUE)
-      .slice(0, 60),
-    [top],
-  );
+  const themeSource = universeItems;
 
   const themeList = useMemo(
     () => buildThemesFromAPI(themeSource, codeThemeMap),
     [themeSource, codeThemeMap],
   );
+
+  const subtitleParts = [`${themeSource.length}종목`];
+  if (universeFilters?.exclude_etf) subtitleParts.push('ETF 제외');
+  if (universeFilters?.exclude_preferred) subtitleParts.push('우선주 제외');
+  if (universeFilters?.min_trade_value) {
+    subtitleParts.push(`${Math.round(universeFilters.min_trade_value / 100000000)}억 미만 제외`);
+  }
 
   return (
     <div className="space-y-4">
@@ -324,7 +278,7 @@ export default function Overview({ onSelectCode }) {
       {/* 주도 테마 (상위 60종목, ETF/우선주/100억미만 제외, 섹터별 묶음) */}
       <Card
         title="오늘의 주도 테마"
-        subtitle={`${themeSource.length}종목 · ETF · 우선주 · 100억 미만 제외`}
+        subtitle={subtitleParts.join(' · ')}
       >
         {/* 1주일 일별 테마 거래대금 */}
         <ThemeDailyChart trend={trendData} />

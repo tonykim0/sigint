@@ -12,6 +12,8 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+from cache_utils import TTLCache
+
 load_dotenv(Path(__file__).with_name(".env"))
 
 APP_KEY = os.getenv("KIS_APP_KEY", "").strip()
@@ -150,23 +152,18 @@ def _get(path: str, tr_id: str, params: dict[str, Any]) -> dict[str, Any]:
 # --- Endpoints ---------------------------------------------------------------
 
 
-_VR_CACHE: dict[str, Any] = {}
-_VR_TTL = 90.0  # 90초
+_VR_CACHE = TTLCache[str, list[dict[str, Any]]](ttl=90.0)
 
 
 def volume_rank(market: str = "ALL", force: bool = False) -> list[dict[str, Any]]:
-    import time as _time
     key = market.upper()
-    cached = _VR_CACHE.get(key)
-    if not force and cached and _time.time() - cached[0] < _VR_TTL:
-        return cached[1]
-    result = _volume_rank_uncached(market)
-    _VR_CACHE[key] = (_time.time(), result)
-    return result
+    return _VR_CACHE.get_or_set(key, lambda: _volume_rank_uncached(market), force=force)
 
 
 def _volume_rank_uncached(market: str = "ALL") -> list[dict[str, Any]]:
-    """거래대금 순위 조회 (KIS volume-rank TR은 30개 상한이라
+    """거래대금 순위 조회.
+
+    KIS volume-rank TR은 30개 상한이라
     보통주/우선주 나눠서 호출 후 거래대금 순으로 합친 뒤 중복 제거).
 
     market: "ALL" | "KOSPI" | "KOSDAQ"
@@ -306,19 +303,11 @@ def daily_index_chart(index_code: str, days: int = 30) -> list[dict[str, Any]]:
     return bars
 
 
-_PRICE_CACHE: dict[str, Any] = {}
-_PRICE_TTL = 30.0
+_PRICE_CACHE = TTLCache[str, dict[str, Any]](ttl=30.0)
 
 
 def inquire_price(code: str, force: bool = False) -> dict[str, Any]:
-    import time as _time
-    now = _time.time()
-    cached = _PRICE_CACHE.get(code)
-    if not force and cached and now - cached[0] < _PRICE_TTL:
-        return cached[1]
-    result = _inquire_price_uncached(code)
-    _PRICE_CACHE[code] = (now, result)
-    return result
+    return _PRICE_CACHE.get_or_set(code, lambda: _inquire_price_uncached(code), force=force)
 
 
 def _inquire_price_uncached(code: str) -> dict[str, Any]:

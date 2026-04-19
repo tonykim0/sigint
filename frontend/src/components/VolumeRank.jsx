@@ -1,15 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api } from '../utils/api.js';
+import { useMemo, useState } from 'react';
 import {
   changeColor,
-  excludeETF,
   formatChangeRate,
   formatInt,
   formatKRWCompact,
-  isPreferred,
 } from '../utils/format.js';
+import { useVolumeRankData } from '../hooks/useVolumeRankData.js';
 
-const MIN_TRADE_VALUE = 10_000_000_000; // 100억
 const INVESTOR_UNIT = 1_000_000; // KIS 투자자 금액: 백만원 → 원
 import Card from './Card.jsx';
 
@@ -115,71 +112,19 @@ function LeaderBadge({ code, leaders }) {
 }
 
 export default function VolumeRank({ onSelectCode }) {
-  const [items, setItems] = useState([]);
-  const [themes, setThemes] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
   const [sort, setSort] = useState({ key: 'trade_value', dir: 'desc' });
   const [view, setView] = useState('list');
   const [refreshSec, setRefreshSec] = useState(15);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [investorItems, setInvestorItems] = useState([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.investorSummary(60)
-      .then((d) => { if (!cancelled) setInvestorItems(d.items || []); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    api
-      .themes()
-      .then((d) => setThemes(d.themes || {}))
-      .catch(() => {});
-  }, []);
-
-  const fetchItems = () => {
-    setLoading(true);
-    setErr(null);
-    return api
-      .volumeRank({ market: 'ALL', topN: 120 })
-      .then((d) => {
-        setItems(excludeETF(d.items));
-        setLastUpdated(new Date());
-      })
-      .catch((e) => { setItems([]); setErr(e.message); })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function refreshItems() {
-      try {
-        const data = await api.volumeRank({ market: 'ALL', topN: 120 });
-        if (cancelled) return;
-        setItems(excludeETF(data.items));
-        setLastUpdated(new Date());
-        setErr(null);
-      } catch (e) {
-        if (!cancelled) {
-          setItems([]);
-          setErr(e.message);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void refreshItems();
-    if (refreshSec === 0 || !isMarketOpen()) return;
-    const id = setInterval(() => {
-      if (!cancelled) void refreshItems();
-    }, refreshSec * 1000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [refreshSec]);
+  const {
+    items,
+    filters,
+    themes,
+    investorItems,
+    loading,
+    err,
+    lastUpdated,
+    refresh,
+  } = useVolumeRankData(refreshSec, isMarketOpen());
 
   const codeMap = useMemo(() => buildCodeThemeMap(themes), [themes]);
 
@@ -190,12 +135,8 @@ export default function VolumeRank({ onSelectCode }) {
     return m;
   }, [investorItems]);
 
-  // ETF + 우선주 + 100억 미만 제외 → 상위 60개 + 투자자 머지
   const filtered = useMemo(() => {
-    const arr = items
-      .filter((r) => !isPreferred(r.name) && (r.trade_value || 0) >= MIN_TRADE_VALUE)
-      .slice(0, 60)
-      .map((r) => {
+    return items.map((r) => {
         const inv = investorMap[r.code];
         return {
           ...r,
@@ -204,7 +145,6 @@ export default function VolumeRank({ onSelectCode }) {
           individual_value: inv ? (inv.individual_value || 0) * INVESTOR_UNIT : null,
         };
       });
-    return arr;
   }, [items, investorMap]);
 
   const sorted = useMemo(() => {
@@ -240,11 +180,18 @@ export default function VolumeRank({ onSelectCode }) {
     );
   }
 
+  const subtitleParts = [`TOP ${filtered.length}`];
+  if (filters?.exclude_etf) subtitleParts.push('ETF 제외');
+  if (filters?.exclude_preferred) subtitleParts.push('우선주 제외');
+  if (filters?.min_trade_value) {
+    subtitleParts.push(`${Math.round(filters.min_trade_value / 100000000)}억 미만 제외`);
+  }
+
   return (
     <div className="space-y-4">
     <Card
       title="거래대금 상위"
-      subtitle={`TOP ${filtered.length} · ETF · 우선주 · 100억 미만 제외`}
+      subtitle={subtitleParts.join(' · ')}
       right={<span>합계 {formatKRWCompact(total)}</span>}
     >
       <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -275,7 +222,7 @@ export default function VolumeRank({ onSelectCode }) {
               </button>
             ))}
             <button
-              onClick={() => fetchItems()}
+              onClick={() => refresh(true)}
               disabled={loading}
               className="px-2 py-0.5 rounded text-xs border border-border text-fg-muted hover:text-fg-bright disabled:opacity-50 ml-1"
             >
