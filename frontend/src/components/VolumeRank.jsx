@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { prefetch } from '../utils/api.js';
 import {
   changeColor,
   formatChangeRate,
@@ -6,6 +7,18 @@ import {
   formatKRWCompact,
 } from '../utils/format.js';
 import { useVolumeRankData } from '../hooks/useVolumeRankData.js';
+
+function useHoverPrefetch(delay = 200) {
+  const timerRef = useRef(null);
+  const onMouseEnter = (code) => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      prefetch(`/api/chart-analysis/${code}?days=300`);
+    }, delay);
+  };
+  const onMouseLeave = () => clearTimeout(timerRef.current);
+  return { onMouseEnter, onMouseLeave };
+}
 
 const INVESTOR_UNIT = 1_000_000; // KIS 투자자 금액: 백만원 → 원
 import Card from './Card.jsx';
@@ -112,6 +125,7 @@ function LeaderBadge({ code, leaders }) {
 }
 
 export default function VolumeRank({ onSelectCode }) {
+  const hover = useHoverPrefetch(200);
   const [sort, setSort] = useState({ key: 'trade_value', dir: 'desc' });
   const [view, setView] = useState('list');
   const [refreshSec, setRefreshSec] = useState(15);
@@ -291,6 +305,8 @@ export default function VolumeRank({ onSelectCode }) {
                     key={r.code}
                     className={`border-b border-border/60 hover:bg-bg-inner cursor-pointer ${dualBuy ? 'bg-accent/5' : ''}`}
                     onClick={() => onSelectCode?.(r.code)}
+                    onMouseEnter={() => hover.onMouseEnter(r.code)}
+                    onMouseLeave={hover.onMouseLeave}
                   >
                     <td className="py-2 px-2 text-right text-fg-muted">
                       {i + 1}
@@ -398,6 +414,8 @@ export default function VolumeRank({ onSelectCode }) {
                         key={r.code}
                         className="border-t border-border/40 hover:bg-bg-inner cursor-pointer"
                         onClick={() => onSelectCode?.(r.code)}
+                        onMouseEnter={() => hover.onMouseEnter(r.code)}
+                        onMouseLeave={hover.onMouseLeave}
                       >
                         <td className="py-2 px-3">
                           <div className="flex items-center gap-1">

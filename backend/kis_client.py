@@ -10,9 +10,18 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
 from dotenv import load_dotenv
 
 from cache_utils import TTLCache
+
+# KIS API 호출 공용 세션 — TCP/TLS 연결 재사용 (keep-alive)
+# 매 호출마다 새 핸드셰이크(50~100ms)를 피한다.
+_SESSION = requests.Session()
+_SESSION.mount(
+    "https://",
+    HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=0),
+)
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -74,7 +83,7 @@ def _issue_token() -> str:
         "appkey": APP_KEY,
         "appsecret": APP_SECRET,
     }
-    resp = requests.post(url, json=payload, timeout=10)
+    resp = _SESSION.post(url, json=payload, timeout=10)
     if resp.status_code != 200:
         raise KISError(f"토큰 발급 실패 HTTP {resp.status_code}: {resp.text}")
 
@@ -124,7 +133,7 @@ def _get(path: str, tr_id: str, params: dict[str, Any]) -> dict[str, Any]:
     attempts = 0
     while True:
         attempts += 1
-        resp = requests.get(url, headers=_headers(tr_id), params=params, timeout=10)
+        resp = _SESSION.get(url, headers=_headers(tr_id), params=params, timeout=10)
 
         if resp.status_code == 401 and attempts <= 2:
             get_access_token(force_refresh=True)

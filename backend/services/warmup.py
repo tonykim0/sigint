@@ -6,6 +6,7 @@ import os
 import threading
 import time as _time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 
 from cache_utils import TTLCache
 from db import initialize_db
@@ -41,11 +42,35 @@ def run_warmup_cycle() -> None:
             log.warning("warmup %s failed: %s", name, exc)
 
 
+_KST = timezone(timedelta(hours=9))
+
+
+def _next_interval_seconds() -> float:
+    """KST 기준 현재 시각에 맞는 워밍업 주기 반환.
+
+    - 평일 09:00~15:30 (장중): 120초
+    - 평일 08:00~09:00 / 15:30~17:00 (프리/애프터 인접): 180초
+    - 평일 그 외: 600초
+    - 주말: 1800초
+    """
+    now = datetime.now(_KST)
+    minutes = now.hour * 60 + now.minute
+    if now.weekday() >= 5:
+        return 1800.0
+    if 9 * 60 <= minutes < 15 * 60 + 30:
+        return 120.0
+    if 8 * 60 <= minutes < 17 * 60:
+        return 180.0
+    return 600.0
+
+
 def _warmup_loop() -> None:
     _time.sleep(1)
     while True:
         run_warmup_cycle()
-        _time.sleep(300)
+        interval = _next_interval_seconds()
+        log.info("warmup sleeping %.0fs", interval)
+        _time.sleep(interval)
 
 
 @asynccontextmanager

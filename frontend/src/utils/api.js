@@ -6,6 +6,13 @@ const API_TIMING_LOG =
   import.meta.env.DEV || import.meta.env.VITE_LOG_API_TIMING === 'true';
 const SLOW_REQUEST_MS = 700;
 
+// stale-while-revalidate 메모리 캐시.
+// 같은 GET 경로를 탭 전환/중복 호출로 재요청할 때 즉시 캐시된 값 반환하고
+// 백그라운드로 신선한 데이터를 받아 다음 접근용으로 채워둔다.
+const _cacheStore = new Map(); // path -> { ts, data }
+const _inflight = new Map();    // path -> Promise (동시 중복 요청 합침)
+const DEFAULT_TTL = 60_000;      // 1분
+
 async function request(path, { method = 'GET', body } = {}) {
   const init = { method };
   if (body !== undefined) {
@@ -35,7 +42,57 @@ async function request(path, { method = 'GET', body } = {}) {
   return resp.json();
 }
 
-const getJSON = (p) => request(p);
+function getJSON(path, { ttl = DEFAULT_TTL, swr = true } = {}) {
+  const cached = _cacheStore.get(path);
+  const now = Date.now();
+  const fresh = cached && now - cached.ts < ttl;
+
+  if (cached && swr) {
+    if (fresh) {
+      // 캐시 신선: 즉시 반환
+      return Promise.resolve(cached.data);
+    }
+    // stale: 일단 오래된 값 반환, 백그라운드로 갱신
+    _refreshInBackground(path);
+    return Promise.resolve(cached.data);
+  }
+
+  return _fetchAndCache(path);
+}
+
+function _fetchAndCache(path) {
+  const existing = _inflight.get(path);
+  if (existing) return existing;
+  const p = request(path)
+    .then((data) => {
+      _cacheStore.set(path, { ts: Date.now(), data });
+      return data;
+    })
+    .finally(() => _inflight.delete(path));
+  _inflight.set(path, p);
+  return p;
+}
+
+function _refreshInBackground(path) {
+  if (_inflight.has(path)) return;
+  _fetchAndCache(path).catch(() => {});
+}
+
+// 캐시 무효화가 필요한 경우 사용 (매매일지 등 쓰기 후)
+export function invalidateCache(prefix = '') {
+  if (!prefix) {
+    _cacheStore.clear();
+    return;
+  }
+  for (const key of _cacheStore.keys()) {
+    if (key.startsWith(prefix)) _cacheStore.delete(key);
+  }
+}
+
+// hover prefetch 등 명시적 예열용
+export function prefetch(path) {
+  _refreshInBackground(path);
+}
 
 export const api = {
   health: () => getJSON('/api/health'),
@@ -84,12 +141,17 @@ export const api = {
   journal: {
     list: () => getJSON('/api/journal'),
     stats: () => getJSON('/api/journal/stats'),
-    add: (payload) => request('/api/journal', { method: 'POST', body: payload }),
+    add: (payload) => request('/api/journal', { method: 'POST', body: payload })
+      .then((r) => (invalidateCache('/api/journal'), r)),
     update: (id, payload) =>
-      request(`/api/journal/${id}`, { method: 'PUT', body: payload }),
-    delete: (id) => request(`/api/journal/${id}`, { method: 'DELETE' }),
-    remove: (id) => request(`/api/journal/${id}`, { method: 'DELETE' }),
-    tracking: (id) => getJSON(`/api/journal/${id}/tracking`),
+      request(`/api/journal/${id}`, { method: 'PUT', body: payload })
+        .then((r) => (invalidateCache('/api/journal'), r)),
+    delete: (id) => request(`/api/journal/${id}`, { method: 'DELETE' })
+      .then((r) => (invalidateCache('/api/journal'), r)),
+    remove: (id) => request(`/api/journal/${id}`, { method: 'DELETE' })
+      .then((r) => (invalidateCache('/api/journal'), r)),
+    tracking: (id) => request(`/api/journal/${id}/tracking`)
+      .then((r) => (invalidateCache('/api/journal'), r)),
   },
   daily: {
     save: (market = 'ALL') =>

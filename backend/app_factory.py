@@ -7,6 +7,7 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from routers.chart import router as chart_router
 from routers.daily_api import router as daily_router
@@ -41,6 +42,9 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["*"],
     )
+
+    # 1KB 이상 응답만 압축 (작은 응답엔 오버헤드가 더 큼)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     @app.middleware("http")
     async def add_request_timing(request: Request, call_next):
