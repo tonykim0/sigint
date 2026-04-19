@@ -309,6 +309,40 @@ export default function Overview({ onSelectCode }) {
         title="오늘의 주도 테마"
         subtitle={`${themeSource.length}종목 · ETF · 우선주 · 100억 미만 제외`}
       >
+        {/* 1주일 트렌드 요약 */}
+        {Object.keys(trendMap).length > 0 && (
+          <div className="mb-3 p-3 rounded-lg bg-bg-inner border border-border">
+            <div className="text-[11px] text-fg-muted font-semibold mb-2">
+              1주일 트렌드 (전반 vs 후반 거래대금 변화)
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.values(trendMap)
+                .filter((t) => t.change_pct != null)
+                .sort((a, b) => b.change_pct - a.change_pct)
+                .slice(0, 8)
+                .map((t) => {
+                  const pct = t.change_pct;
+                  return (
+                    <span
+                      key={t.theme}
+                      className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded border ${
+                        pct >= 0
+                          ? 'bg-up/10 text-up border-up/30'
+                          : 'bg-down/10 text-down border-down/30'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: t.color }} />
+                      <span className="font-medium">{t.theme}</span>
+                      <span className="font-bold tabular-nums">
+                        {pct > 0 ? '▲' : '▼'}{Math.min(Math.abs(pct), 999).toFixed(0)}%
+                      </span>
+                    </span>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
         {themeList.length === 0 ? (
           <div className="text-xs text-fg-muted">{loading ? '조회 중…' : '감지된 테마 없음'}</div>
         ) : (
@@ -342,10 +376,16 @@ export default function Overview({ onSelectCode }) {
                   </div>
                   {/* 1주일 스파크라인 */}
                   {sparkData.length >= 2 && (
-                    <div className="w-20 h-7 shrink-0" title="최근 1주일 거래대금">
+                    <div className="w-32 h-10 shrink-0" title="최근 1주일 거래대금 추이">
                       <ResponsiveContainer>
                         <LineChart data={sparkData}>
-                          <Line type="monotone" dataKey="value" stroke={g.color} strokeWidth={1.5} dot={false} />
+                          <Line
+                            type="monotone"
+                            dataKey="value"
+                            stroke={g.color}
+                            strokeWidth={2}
+                            dot={{ r: 2, fill: g.color }}
+                          />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -353,10 +393,15 @@ export default function Overview({ onSelectCode }) {
                   {/* 1주일 전반 vs 후반 변화율 */}
                   {changePct != null && (
                     <span
-                      className={`text-[11px] font-semibold tabular-nums shrink-0 ${changePct >= 0 ? 'text-up' : 'text-down'}`}
-                      title="전반 3일 vs 후반 3일 거래대금 변화"
+                      className={`px-2 py-0.5 text-[11px] font-semibold tabular-nums shrink-0 rounded border ${
+                        changePct >= 0
+                          ? 'bg-up/15 text-up border-up/40'
+                          : 'bg-down/15 text-down border-down/40'
+                      }`}
+                      title="전반 3~4일 평균 거래대금 대비 후반 3~4일 변화"
                     >
-                      {changePct > 0 ? '▲' : changePct < 0 ? '▼' : ''}{Math.abs(changePct).toFixed(0)}%
+                      1주 {changePct > 0 ? '+' : ''}{Math.min(Math.abs(changePct), 999).toFixed(0)}
+                      {Math.abs(changePct) > 999 ? '%+' : '%'}
                     </span>
                   )}
                   <span className="text-sm text-accent font-semibold tabular-nums shrink-0">
