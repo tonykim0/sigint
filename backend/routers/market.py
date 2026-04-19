@@ -76,10 +76,11 @@ def api_themes() -> dict:
 @router.get("/theme-trend")
 def api_theme_trend(
     days: int = Query(7, ge=3, le=30),
+    limit: int = Query(60, ge=12, le=60),
     force: bool = Query(False),
 ) -> dict:
     try:
-        return theme_trend_mod.theme_trend(days=days, force=force)
+        return theme_trend_mod.theme_trend(days=days, limit=limit, force=force)
     except KISError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

@@ -13,6 +13,7 @@ from universe import get_trading_universe
 
 _CACHE = TTLCache[str, dict[str, Any]](ttl=900.0)
 _THEMES_PATH = pathlib.Path(__file__).parent / "data" / "themes.json"
+_MAX_WORKERS = 6
 
 
 def _load_themes() -> dict[str, dict[str, Any]]:
@@ -33,13 +34,14 @@ def _code_to_theme(themes: dict[str, dict[str, Any]]) -> dict[str, tuple[str, st
     return mapping
 
 
-def theme_trend(days: int = 7, force: bool = False) -> dict[str, Any]:
-    key = f"theme-trend:{days}"
+def theme_trend(days: int = 7, limit: int = 60, force: bool = False) -> dict[str, Any]:
+    key = f"theme-trend:{days}:{limit}"
 
     def build() -> dict[str, Any]:
-        stocks = get_trading_universe(limit=60, force=force)
+        stocks = get_trading_universe(limit=limit, force=force)
         themes = _load_themes()
         code_map = _code_to_theme(themes)
+        themed_stocks = [stock for stock in stocks if stock["code"] in code_map] or stocks
 
         def fetch(code: str) -> list[dict[str, Any]]:
             try:
@@ -47,13 +49,17 @@ def theme_trend(days: int = 7, force: bool = False) -> dict[str, Any]:
             except KISError:
                 return []
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            bars_map = {stock["code"]: executor.submit(fetch, stock["code"]) for stock in stocks}
+        max_workers = min(_MAX_WORKERS, max(len(themed_stocks), 1))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            bars_map = {
+                stock["code"]: executor.submit(fetch, stock["code"])
+                for stock in themed_stocks
+            }
             bars_map = {code: future.result() for code, future in bars_map.items()}
 
         theme_daily: dict[str, dict[str, int]] = {}
         theme_color: dict[str, str] = {}
-        for stock in stocks:
+        for stock in themed_stocks:
             theme, color = code_map.get(stock["code"], ("기타", "#4b5563"))
             theme_color[theme] = color
             for bar in bars_map.get(stock["code"], []):
@@ -83,7 +89,8 @@ def theme_trend(days: int = 7, force: bool = False) -> dict[str, Any]:
         themes_out.sort(key=lambda row: -row["total"])
         return {
             "days": days,
-            "count": len(stocks),
+            "count": len(themed_stocks),
+            "universe_count": len(stocks),
             "themes": themes_out,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }

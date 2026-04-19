@@ -42,7 +42,7 @@ def run_warmup_cycle() -> None:
 
 
 def _warmup_loop() -> None:
-    _time.sleep(3)
+    _time.sleep(1)
     while True:
         run_warmup_cycle()
         _time.sleep(300)

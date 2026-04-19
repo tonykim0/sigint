@@ -2,6 +2,9 @@
 // 데모 모드: 서버 미연결 시 빈 데이터 반환 대신 에러 throw. 상위에서 잡아 UI 상태 결정.
 
 const BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
+const API_TIMING_LOG =
+  import.meta.env.DEV || import.meta.env.VITE_LOG_API_TIMING === 'true';
+const SLOW_REQUEST_MS = 700;
 
 async function request(path, { method = 'GET', body } = {}) {
   const init = { method };
@@ -9,7 +12,22 @@ async function request(path, { method = 'GET', body } = {}) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(body);
   }
+  const started = performance.now();
   const resp = await fetch(`${BASE}${path}`, init);
+  const totalMs = performance.now() - started;
+  const serverMs = Number(resp.headers.get('X-Process-Time'));
+
+  if (API_TIMING_LOG) {
+    const summary = `${method} ${path} total=${totalMs.toFixed(1)}ms${
+      Number.isFinite(serverMs) ? ` server=${serverMs.toFixed(1)}ms` : ''
+    }`;
+    if (totalMs >= SLOW_REQUEST_MS) {
+      console.warn(`[api-slow] ${summary}`);
+    } else {
+      console.debug(`[api] ${summary}`);
+    }
+  }
+
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
     throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
@@ -43,7 +61,8 @@ export const api = {
   marketFlow: () => getJSON('/api/market-flow'),
   search: (q) => getJSON(`/api/search?q=${encodeURIComponent(q)}`),
   themes: () => getJSON('/api/themes'),
-  themeTrend: (days = 7) => getJSON(`/api/theme-trend?days=${days}`),
+  themeTrend: (days = 7, { limit = 60 } = {}) =>
+    getJSON(`/api/theme-trend?days=${days}&limit=${limit}`),
   screener: {
     closingBet: ({ force = false } = {}) =>
       getJSON(`/api/screener/closing-bet${force ? '?force=true' : ''}`),

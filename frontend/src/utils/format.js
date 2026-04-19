@@ -30,30 +30,8 @@ export function changeColor(rate) {
   return rate > 0 ? 'text-up' : 'text-down';
 }
 
-// ETF/ETN 감지 — 이름 prefix 기준. 국내 주요 운용사 브랜드를 매칭.
-const ETF_PREFIXES = [
-  'KODEX', 'TIGER', 'KBSTAR', 'ACE', 'ARIRANG', 'HANARO', 'KOSEF',
-  'KINDEX', 'FOCUS', 'SOL', 'TIMEFOLIO', 'WOORI', 'PLUS', 'TREX',
-  'SMART', 'HK S&P', 'RISE', 'SOXX', '파워',
-];
-
-export function isETF(name) {
-  if (!name) return false;
-  const n = name.toUpperCase();
-  if (n.includes(' ETN')) return true;
-  if (n.startsWith('INVERSE') || n.startsWith('KOSPI')) return true;
-  return ETF_PREFIXES.some((p) => n.startsWith(p.toUpperCase()));
-}
-
-export function excludeETF(items) {
-  return (items || []).filter((r) => !isETF(r.name));
-}
-
-// 우선주 감지 — 이름 끝이 '우' 또는 '우B', '2우B' 등
-export function isPreferred(name) {
-  if (!name) return false;
-  return /우[AB]?$/.test(name) || /\d우[AB]?$/.test(name) || name.includes('2우B');
-}
+// NOTE: ETF/우선주/거래대금 필터는 백엔드 universe.py 에서 일괄 처리하므로
+// 프론트 사이드에 같은 로직을 두지 않는다.
 
 export function formatTime(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');

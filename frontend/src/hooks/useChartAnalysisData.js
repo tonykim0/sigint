@@ -42,7 +42,8 @@ export function useChartAnalysisData(initialCode) {
     if (!/^\d{6}$/.test(code)) return;
     let cancelled = false;
 
-    api.chartAnalysis(code, { days: 500 })
+    // 300 trading days is enough for current pattern logic while keeping payload smaller.
+    api.chartAnalysis(code, { days: 300 })
       .then((data) => {
         if (cancelled) return;
         setPrice(data.price || null);

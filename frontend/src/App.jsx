@@ -21,7 +21,7 @@ export default function App() {
   const [selectedCode, setSelectedCode] = useState(null);
   const [connected, setConnected] = useState(false);
 
-  // 3초 간격 헬스체크
+  // 연결 상태만 확인하면 충분해서 과도한 폴링은 피한다.
   useEffect(() => {
     let cancelled = false;
     async function ping() {
@@ -33,7 +33,7 @@ export default function App() {
       }
     }
     ping();
-    const id = setInterval(ping, 3000);
+    const id = setInterval(ping, 15000);
     return () => {
       cancelled = true;
       clearInterval(id);

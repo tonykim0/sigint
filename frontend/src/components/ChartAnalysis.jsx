@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -7,7 +7,6 @@ import {
   LineSeries,
   createChart,
 } from 'lightweight-charts';
-import { api } from '../utils/api.js';
 import {
   changeColor,
   formatChangeRate,

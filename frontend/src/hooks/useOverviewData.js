@@ -14,6 +14,8 @@ export function useOverviewData() {
 
   useEffect(() => {
     let cancelled = false;
+    let flowTimer = null;
+    let trendTimer = null;
 
     async function loadOverview() {
       try {
@@ -39,25 +41,33 @@ export function useOverviewData() {
 
     void loadOverview();
 
-    api.marketFlow()
-      .then((data) => {
-        if (!cancelled) {
-          setFlow(data);
-          setFlowLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setFlowLoading(false);
-      });
+    // Secondary cards are useful, but they trigger much heavier backend work.
+    // Stagger them so the initial overview becomes interactive first.
+    flowTimer = window.setTimeout(() => {
+      api.marketFlow()
+        .then((data) => {
+          if (!cancelled) {
+            setFlow(data);
+            setFlowLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setFlowLoading(false);
+        });
+    }, 300);
 
-    api.themeTrend(7)
-      .then((data) => {
-        if (!cancelled) setTrendData(data);
-      })
-      .catch(() => {});
+    trendTimer = window.setTimeout(() => {
+      api.themeTrend(7, { limit: 36 })
+        .then((data) => {
+          if (!cancelled) setTrendData(data);
+        })
+        .catch(() => {});
+    }, 1200);
 
     return () => {
       cancelled = true;
+      if (flowTimer !== null) window.clearTimeout(flowTimer);
+      if (trendTimer !== null) window.clearTimeout(trendTimer);
     };
   }, []);
 

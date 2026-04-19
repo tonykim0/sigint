@@ -362,6 +362,7 @@ def _inquire_price_uncached(code: str) -> dict[str, Any]:
 
 _DC_CACHE: dict[str, Any] = {}
 _DC_TTL = 120.0  # 2분
+_INVESTOR_CACHE = TTLCache[str, list[dict[str, Any]]](ttl=180.0)
 
 
 def daily_chart(code: str, days: int = 90, force: bool = False) -> list[dict[str, Any]]:
@@ -628,44 +629,47 @@ def aggregate_minute_bars(
     return out
 
 
-def inquire_investor(code: str) -> list[dict[str, Any]]:
+def inquire_investor(code: str, force: bool = False) -> list[dict[str, Any]]:
     """투자자별 매매동향 — 최근 영업일 리스트.
 
     실 응답 output 필드(대표): stck_bsop_date, prsn_ntby_qty(개인), frgn_ntby_qty(외국인),
     orgn_ntby_qty(기관계). 금액 필드는 '_tr_pbmn' 접미사. 문서와 필드명이 일부 다를 수 있어
     방어적으로 파싱한다.
     """
-    params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
-    data = _get(
-        "/uapi/domestic-stock/v1/quotations/inquire-investor",
-        tr_id="FHKST01010900",
-        params=params,
-    )
-    rows = data.get("output", []) or []
-
-    def _i(r: dict[str, Any], *keys: str) -> int:
-        for k in keys:
-            v = r.get(k)
-            if v not in (None, ""):
-                try:
-                    return int(float(v))
-                except (TypeError, ValueError):
-                    continue
-        return 0
-
-    result = []
-    for r in rows:
-        d = r.get("stck_bsop_date") or ""
-        date = f"{d[:4]}-{d[4:6]}-{d[6:8]}" if len(d) == 8 else d
-        result.append(
-            {
-                "date": date,
-                "individual_qty": _i(r, "prsn_ntby_qty"),
-                "foreign_qty": _i(r, "frgn_ntby_qty"),
-                "institution_qty": _i(r, "orgn_ntby_qty"),
-                "individual_value": _i(r, "prsn_ntby_tr_pbmn"),
-                "foreign_value": _i(r, "frgn_ntby_tr_pbmn"),
-                "institution_value": _i(r, "orgn_ntby_tr_pbmn"),
-            }
+    def build() -> list[dict[str, Any]]:
+        params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
+        data = _get(
+            "/uapi/domestic-stock/v1/quotations/inquire-investor",
+            tr_id="FHKST01010900",
+            params=params,
         )
-    return result
+        rows = data.get("output", []) or []
+
+        def _i(r: dict[str, Any], *keys: str) -> int:
+            for k in keys:
+                v = r.get(k)
+                if v not in (None, ""):
+                    try:
+                        return int(float(v))
+                    except (TypeError, ValueError):
+                        continue
+            return 0
+
+        result = []
+        for r in rows:
+            d = r.get("stck_bsop_date") or ""
+            date = f"{d[:4]}-{d[4:6]}-{d[6:8]}" if len(d) == 8 else d
+            result.append(
+                {
+                    "date": date,
+                    "individual_qty": _i(r, "prsn_ntby_qty"),
+                    "foreign_qty": _i(r, "frgn_ntby_qty"),
+                    "institution_qty": _i(r, "orgn_ntby_qty"),
+                    "individual_value": _i(r, "prsn_ntby_tr_pbmn"),
+                    "foreign_value": _i(r, "frgn_ntby_tr_pbmn"),
+                    "institution_value": _i(r, "orgn_ntby_tr_pbmn"),
+                }
+            )
+        return result
+
+    return _INVESTOR_CACHE.get_or_set(code, build, force=force)
