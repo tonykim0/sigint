@@ -33,6 +33,7 @@ export const api = {
     getJSON(`/api/minute-chart/${code}?time_unit=${timeUnit}`),
   index: () => getJSON('/api/index'),
   investorSummary: (topN = 10) => getJSON(`/api/investor-summary?top_n=${topN}`),
+  marketFlow: () => getJSON('/api/market-flow'),
   search: (q) => getJSON(`/api/search?q=${encodeURIComponent(q)}`),
   themes: () => getJSON('/api/themes'),
   screener: {

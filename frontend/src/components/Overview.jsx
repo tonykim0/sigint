@@ -102,6 +102,61 @@ function buildThemesFromAPI(rankItems, codeThemeMap) {
   return Object.values(map).sort((a, b) => b.value - a.value);
 }
 
+// ── 시장 수급 (개인/기관/외인) ──────────────────────────────────
+function MarketFlowCard({ label, flow, loading }) {
+  if (loading || !flow) {
+    return (
+      <div className="bg-bg-card border border-border rounded-xl p-[18px]">
+        <div className="text-xs text-fg-muted mb-2 font-semibold">{label} · 현물 수급</div>
+        <div className="text-fg-muted text-sm">{loading ? '조회 중…' : '—'}</div>
+      </div>
+    );
+  }
+  const parts = [
+    { key: 'foreign', label: '외인', color: '#3b82f6', value: flow.foreign },
+    { key: 'institution', label: '기관', color: '#a78bfa', value: flow.institution },
+    { key: 'individual', label: '개인', color: '#fb923c', value: flow.individual },
+  ];
+  const maxAbs = Math.max(...parts.map((p) => Math.abs(p.value)), 1);
+
+  return (
+    <div className="bg-bg-card border border-border rounded-xl p-[18px]">
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="text-sm font-bold text-fg-white">{label}</div>
+        <div className="text-[10px] text-fg-muted">현물 TOP {flow.count || 10} 합산</div>
+      </div>
+      <div className="space-y-2">
+        {parts.map((p) => {
+          const isPos = p.value >= 0;
+          const widthPct = Math.abs(p.value) / maxAbs * 100;
+          return (
+            <div key={p.key} className="flex items-center gap-2">
+              <span className="text-xs text-fg-muted w-8 shrink-0">{p.label}</span>
+              <div className="flex-1 h-5 bg-bg-inner rounded relative overflow-hidden">
+                <div
+                  className="absolute top-0 bottom-0 left-1/2 transition-all"
+                  style={{
+                    width: `${widthPct / 2}%`,
+                    background: p.color,
+                    transform: isPos ? 'translateX(0)' : 'translateX(-100%)',
+                    opacity: 0.75,
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className={`text-xs font-semibold tabular-nums ${isPos ? 'text-up' : 'text-down'}`}>
+                    {isPos ? '+' : ''}{formatKRWCompact(p.value)}
+                  </span>
+                </div>
+                <div className="absolute top-0 bottom-0 left-1/2 w-px bg-border" />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── 외국인 순매수 TOP 5 ────────────────────────────────────────
 function ForeignTop5({ items, onSelectCode }) {
   const top5 = useMemo(
@@ -149,6 +204,8 @@ export default function Overview({ onSelectCode }) {
   const [top, setTop] = useState([]);
   const [indexData, setIndexData] = useState(null);
   const [investorItems, setInvestorItems] = useState([]);
+  const [flow, setFlow] = useState(null);
+  const [flowLoading, setFlowLoading] = useState(true);
   const [themes, setThemes] = useState({});
   const [loading, setLoading] = useState(true);
   const [indexLoading, setIndexLoading] = useState(true);
@@ -186,6 +243,11 @@ export default function Overview({ onSelectCode }) {
 
     void loadOverview();
 
+    // 시장 수급 — 병렬, 10초 정도 걸릴 수 있으므로 별도 로딩
+    api.marketFlow()
+      .then((d) => { if (!cancelled) { setFlow(d); setFlowLoading(false); } })
+      .catch(() => { if (!cancelled) setFlowLoading(false); });
+
     return () => { cancelled = true; };
   }, []);
 
@@ -204,24 +266,20 @@ export default function Overview({ onSelectCode }) {
     [top, codeThemeMap],
   );
 
-  const totalTrade = useMemo(
-    () => top.slice(0, 10).reduce((s, r) => s + (r.trade_value || 0), 0),
-    [top],
-  );
-
   return (
     <div className="space-y-4">
       <TimetableBar />
 
-      {/* 지수 + 총 거래대금 */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {/* 지수 카드 */}
+      <div className="grid grid-cols-2 gap-3">
         <IndexCard label="KOSPI" data={indexData?.kospi} loading={indexLoading} />
         <IndexCard label="KOSDAQ" data={indexData?.kosdaq} loading={indexLoading} />
-        <div className="bg-bg-card border border-border rounded-xl p-[18px] col-span-2 sm:col-span-1">
-          <div className="text-xs text-fg-muted mb-1">TOP 10 총 거래대금</div>
-          <div className="text-xl font-bold text-fg-white">{formatKRWCompact(totalTrade)}</div>
-          <div className="text-xs text-fg-muted mt-1">{top.length > 0 ? `${Math.min(top.length, 10)}개 종목` : '—'}</div>
-        </div>
+      </div>
+
+      {/* 시장 수급 (현물) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <MarketFlowCard label="KOSPI" flow={flow?.kospi} loading={flowLoading} />
+        <MarketFlowCard label="KOSDAQ" flow={flow?.kosdaq} loading={flowLoading} />
       </div>
 
       {/* 주도 테마 */}

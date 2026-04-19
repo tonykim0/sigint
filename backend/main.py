@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import analyzers
 import daily_store
 import journal
+import market_flow as market_flow_mod
 from kis_client import (
     KISError,
     aggregate_minute_bars,
@@ -67,6 +68,15 @@ def api_index() -> dict:
             kospi = kf.result()
             kosdaq = kdf.result()
         return {"kospi": kospi, "kosdaq": kosdaq}
+    except KISError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/market-flow")
+def api_market_flow(force: bool = Query(False)) -> dict:
+    """KOSPI / KOSDAQ 현물 수급 (개인/기관/외인)."""
+    try:
+        return market_flow_mod.market_flow(force=force)
     except KISError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
