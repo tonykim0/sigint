@@ -33,6 +33,37 @@ from kis_client import (
     volume_rank,
 )
 
+_ETF_PREFIXES = (
+    "KODEX", "TIGER", "KBSTAR", "ACE", "ARIRANG", "HANARO", "KOSEF",
+    "KINDEX", "FOCUS", "SOL", "TIMEFOLIO", "PLUS", "TREX", "RISE",
+)
+
+
+def _is_etf(name: str) -> bool:
+    n = (name or "").upper()
+    if " ETN" in n:
+        return True
+    return any(n.startswith(p) for p in _ETF_PREFIXES)
+
+
+def _is_preferred(name: str) -> bool:
+    if not name:
+        return False
+    if name.endswith("우") or name.endswith("우B"):
+        return True
+    return "2우B" in name
+
+
+def _filtered_top60() -> list[dict[str, Any]]:
+    """거래대금 탭과 동일한 필터: ETF/우선주/100억미만 제외 후 상위 60개."""
+    rank = volume_rank("ALL")
+    return [
+        r for r in rank
+        if not _is_etf(r["name"])
+        and not _is_preferred(r["name"])
+        and r.get("trade_value", 0) >= 10_000_000_000
+    ][:60]
+
 _CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 _SWING_CACHE: dict[str, Any] = {"pullback": None, "breakout": None, "ts_pb": 0.0, "ts_br": 0.0}
 _REGIME_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
@@ -114,7 +145,7 @@ def closing_bet(force: bool = False) -> dict[str, Any]:
         if not force and _CACHE["data"] and now - _CACHE["ts"] < _CACHE_TTL:
             return _CACHE["data"]
 
-    rank = volume_rank("ALL")[:30]
+    rank = _filtered_top60()
 
     with ThreadPoolExecutor(max_workers=3) as ex:
         kospi_f = ex.submit(index_price, "0001")
@@ -317,7 +348,7 @@ def pullback_swing(force: bool = False) -> dict[str, Any]:
         if not force and _SWING_CACHE["pullback"] and now - _SWING_CACHE["ts_pb"] < _CACHE_TTL:
             return _SWING_CACHE["pullback"]
 
-    rank = volume_rank("ALL")[:30]
+    rank = _filtered_top60()
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {s["code"]: ex.submit(_fetch_daily_only, s["code"]) for s in rank}
         datas = {code: f.result() for code, f in futures.items()}
@@ -402,7 +433,7 @@ def breakout_swing(force: bool = False) -> dict[str, Any]:
         if not force and _SWING_CACHE["breakout"] and now - _SWING_CACHE["ts_br"] < _CACHE_TTL:
             return _SWING_CACHE["breakout"]
 
-    rank = volume_rank("ALL")[:30]
+    rank = _filtered_top60()
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {s["code"]: ex.submit(_fetch_daily_only, s["code"]) for s in rank}
         datas = {code: f.result() for code, f in futures.items()}
