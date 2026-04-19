@@ -220,41 +220,47 @@ function FlowHistoryChart({ label, history, loading }) {
   );
 }
 
-// ── 외국인 순매수 TOP 5 ────────────────────────────────────────
-function ForeignTop5({ items, onSelectCode }) {
-  const top5 = useMemo(
-    () => [...(items || [])].sort((a, b) => b.foreign_value - a.foreign_value).slice(0, 5),
-    [items],
+// ── 투자자별 순매수 TOP 10 ──────────────────────────────────────
+function InvestorTop10({ items, field, title, color, onSelectCode }) {
+  const top10 = useMemo(
+    () => [...(items || [])]
+      .sort((a, b) => (b[field] || 0) - (a[field] || 0))
+      .slice(0, 10),
+    [items, field],
   );
   return (
-    <Card title="외국인 순매수 TOP 5" subtitle="거래대금 상위 기준">
-      <div className="space-y-2">
-        {top5.map((r) => (
-          <button
-            key={r.code}
-            onClick={() => onSelectCode?.(r.code)}
-            className="w-full flex items-center gap-3 hover:bg-bg-inner rounded-md px-2 py-1.5 transition-colors"
-          >
-            <span
-              className={`shrink-0 w-1.5 h-8 rounded-full ${
-                r.foreign_value > 0 ? 'bg-up' : 'bg-down'
-              }`}
-            />
-            <div className="flex-1 text-left min-w-0">
-              <div className="text-sm text-fg-white font-semibold truncate">{r.name}</div>
-              <div className="text-[11px] text-fg-muted">{r.code}</div>
-            </div>
-            <div className="text-right tabular-nums shrink-0">
-              <div className={`text-sm font-semibold ${r.foreign_value > 0 ? 'text-up' : 'text-down'}`}>
-                {r.foreign_value > 0 ? '+' : ''}{formatKRWCompact(r.foreign_value)}
+    <Card title={title} subtitle="거래대금 상위 30종목 중">
+      <div className="space-y-1">
+        {top10.map((r, i) => {
+          const value = r[field] || 0;
+          const isPos = value > 0;
+          return (
+            <button
+              key={r.code}
+              onClick={() => onSelectCode?.(r.code)}
+              className="w-full flex items-center gap-2 hover:bg-bg-inner rounded-md px-2 py-1.5 transition-colors"
+            >
+              <span className="text-[11px] text-fg-muted tabular-nums w-5 shrink-0">{i + 1}</span>
+              <span
+                className="shrink-0 w-1 h-8 rounded-full"
+                style={{ background: isPos ? color : '#3b82f6', opacity: isPos ? 1 : 0.6 }}
+              />
+              <div className="flex-1 text-left min-w-0">
+                <div className="text-sm text-fg-white font-semibold truncate">{r.name}</div>
+                <div className="text-[10px] text-fg-muted">{r.code}</div>
               </div>
-              <div className={`text-xs ${changeColor(r.change_rate)}`}>
-                {formatChangeRate(r.change_rate)}
+              <div className="text-right tabular-nums shrink-0">
+                <div className={`text-sm font-semibold ${isPos ? 'text-up' : 'text-down'}`}>
+                  {isPos ? '+' : ''}{formatKRWCompact(value)}
+                </div>
+                <div className={`text-[10px] ${changeColor(r.change_rate)}`}>
+                  {formatChangeRate(r.change_rate)}
+                </div>
               </div>
-            </div>
-          </button>
-        ))}
-        {top5.length === 0 && (
+            </button>
+          );
+        })}
+        {top10.length === 0 && (
           <div className="text-xs text-fg-muted py-4 text-center">데이터 없음</div>
         )}
       </div>
@@ -287,7 +293,7 @@ export default function Overview({ onSelectCode }) {
         const [indexResult, rankData, invData] = await Promise.all([
           api.index(),
           api.volumeRank({ topN: 30 }),
-          api.investorSummary(10),
+          api.investorSummary(30),
         ]);
         if (cancelled) return;
         setIndexData(indexResult);
@@ -388,30 +394,45 @@ export default function Overview({ onSelectCode }) {
         )}
       </Card>
 
-      {/* 거래대금 TOP 10 그리드 + 외국인 순매수 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card title="거래대금 TOP 10" right={err && <span className="text-warn text-xs">{err}</span>} className="lg:col-span-2">
-          {loading && <div className="text-xs text-fg-muted mb-2">조회 중…</div>}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {top.slice(0, 10).map((r) => (
-              <button
-                key={r.code}
-                onClick={() => onSelectCode?.(r.code)}
-                className="text-left p-2 sm:p-3 rounded-md bg-bg-inner border border-border hover:border-accent/60 transition-colors"
-              >
-                <div className="text-sm text-fg-white font-bold truncate">{r.name}</div>
-                <div className="text-[10px] text-fg-muted">{r.code}</div>
-                <div className="mt-1.5 text-sm text-fg-white tabular-nums">{formatInt(r.price)}</div>
-                <div className={`text-xs ${changeColor(r.change_rate)}`}>{formatChangeRate(r.change_rate)}</div>
-                <div className="text-[10px] text-fg-muted mt-0.5">{formatKRWCompact(r.trade_value)}</div>
-              </button>
-            ))}
-            {top.length === 0 && !loading && (
-              <div className="col-span-5 py-8 text-center text-fg-muted text-sm">데이터 없음</div>
-            )}
-          </div>
-        </Card>
-        <ForeignTop5 items={investorItems} onSelectCode={onSelectCode} />
+      {/* 거래대금 TOP 10 */}
+      <Card title="거래대금 TOP 10" right={err && <span className="text-warn text-xs">{err}</span>}>
+        {loading && <div className="text-xs text-fg-muted mb-2">조회 중…</div>}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {top.slice(0, 10).map((r) => (
+            <button
+              key={r.code}
+              onClick={() => onSelectCode?.(r.code)}
+              className="text-left p-2 sm:p-3 rounded-md bg-bg-inner border border-border hover:border-accent/60 transition-colors"
+            >
+              <div className="text-sm text-fg-white font-bold truncate">{r.name}</div>
+              <div className="text-[10px] text-fg-muted">{r.code}</div>
+              <div className="mt-1.5 text-sm text-fg-white tabular-nums">{formatInt(r.price)}</div>
+              <div className={`text-xs ${changeColor(r.change_rate)}`}>{formatChangeRate(r.change_rate)}</div>
+              <div className="text-[10px] text-fg-muted mt-0.5">{formatKRWCompact(r.trade_value)}</div>
+            </button>
+          ))}
+          {top.length === 0 && !loading && (
+            <div className="col-span-5 py-8 text-center text-fg-muted text-sm">데이터 없음</div>
+          )}
+        </div>
+      </Card>
+
+      {/* 외국인 / 기관 순매수 TOP 10 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <InvestorTop10
+          items={investorItems}
+          field="foreign_value"
+          title="외국인 순매수 TOP 10"
+          color="#3b82f6"
+          onSelectCode={onSelectCode}
+        />
+        <InvestorTop10
+          items={investorItems}
+          field="institution_value"
+          title="기관 순매수 TOP 10"
+          color="#a78bfa"
+          onSelectCode={onSelectCode}
+        />
       </div>
     </div>
   );
