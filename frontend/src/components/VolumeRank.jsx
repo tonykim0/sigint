@@ -12,13 +12,6 @@ import {
 const MIN_TRADE_VALUE = 10_000_000_000; // 100억
 const INVESTOR_UNIT = 1_000_000; // KIS 투자자 금액: 백만원 → 원
 import Card from './Card.jsx';
-import InvestorTop10 from './InvestorTop10.jsx';
-
-const MARKETS = [
-  { id: 'ALL', label: 'ALL' },
-  { id: 'KOSPI', label: 'KOSPI' },
-  { id: 'KOSDAQ', label: 'KOSDAQ' },
-];
 
 const REFRESH_OPTIONS = [
   { value: 10, label: '10초' },
@@ -122,7 +115,6 @@ function LeaderBadge({ code, leaders }) {
 }
 
 export default function VolumeRank({ onSelectCode }) {
-  const [market, setMarket] = useState('ALL');
   const [items, setItems] = useState([]);
   const [themes, setThemes] = useState({});
   const [loading, setLoading] = useState(true);
@@ -148,11 +140,11 @@ export default function VolumeRank({ onSelectCode }) {
       .catch(() => {});
   }, []);
 
-  const fetchItems = (mkt) => {
+  const fetchItems = () => {
     setLoading(true);
     setErr(null);
     return api
-      .volumeRank({ market: mkt, topN: 120 })
+      .volumeRank({ market: 'ALL', topN: 120 })
       .then((d) => {
         setItems(excludeETF(d.items));
         setLastUpdated(new Date());
@@ -166,7 +158,7 @@ export default function VolumeRank({ onSelectCode }) {
 
     async function refreshItems() {
       try {
-        const data = await api.volumeRank({ market, topN: 120 });
+        const data = await api.volumeRank({ market: 'ALL', topN: 120 });
         if (cancelled) return;
         setItems(excludeETF(data.items));
         setLastUpdated(new Date());
@@ -187,7 +179,7 @@ export default function VolumeRank({ onSelectCode }) {
       if (!cancelled) void refreshItems();
     }, refreshSec * 1000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [market, refreshSec]);
+  }, [refreshSec]);
 
   const codeMap = useMemo(() => buildCodeThemeMap(themes), [themes]);
 
@@ -283,7 +275,7 @@ export default function VolumeRank({ onSelectCode }) {
               </button>
             ))}
             <button
-              onClick={() => fetchItems(market)}
+              onClick={() => fetchItems()}
               disabled={loading}
               className="px-2 py-0.5 rounded text-xs border border-border text-fg-muted hover:text-fg-bright disabled:opacity-50 ml-1"
             >
@@ -291,23 +283,6 @@ export default function VolumeRank({ onSelectCode }) {
             </button>
           </div>
         </div>
-
-        {MARKETS.map((m) => {
-          const active = m.id === market;
-          return (
-            <button
-              key={m.id}
-              onClick={() => setMarket(m.id)}
-              className={`px-3 py-1 text-xs rounded-md border transition-colors ${
-                active
-                  ? 'bg-accent/15 border-accent text-accent'
-                  : 'border-border text-fg-muted hover:text-fg-bright'
-              }`}
-            >
-              {m.label}
-            </button>
-          );
-        })}
 
         <div className="ml-auto flex items-center rounded-md overflow-hidden border border-border">
           <button
@@ -504,23 +479,6 @@ export default function VolumeRank({ onSelectCode }) {
       )}
     </Card>
 
-    {/* 외국인/기관 순매수 TOP 10 */}
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <InvestorTop10
-        items={investorItems}
-        field="foreign_value"
-        title="외국인 순매수 TOP 10"
-        color="#3b82f6"
-        onSelectCode={onSelectCode}
-      />
-      <InvestorTop10
-        items={investorItems}
-        field="institution_value"
-        title="기관 순매수 TOP 10"
-        color="#a78bfa"
-        onSelectCode={onSelectCode}
-      />
-    </div>
     </div>
   );
 }
