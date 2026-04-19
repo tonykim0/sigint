@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../utils/api.js';
 import {
   changeColor,
+  excludeETF,
   formatChangeRate,
   formatInt,
   formatKRWCompact,
@@ -126,7 +127,7 @@ export default function VolumeRank({ onSelectCode }) {
     return api
       .volumeRank({ market: mkt, topN: 60 })
       .then((d) => {
-        setItems(d.items || []);
+        setItems(excludeETF(d.items));
         setLastUpdated(new Date());
       })
       .catch((e) => { setItems([]); setErr(e.message); })
@@ -140,7 +141,7 @@ export default function VolumeRank({ onSelectCode }) {
       try {
         const data = await api.volumeRank({ market, topN: 60 });
         if (cancelled) return;
-        setItems(data.items || []);
+        setItems(excludeETF(data.items));
         setLastUpdated(new Date());
         setErr(null);
       } catch (e) {

@@ -13,6 +13,7 @@ import {
 import { api } from '../utils/api.js';
 import {
   changeColor,
+  excludeETF,
   formatChangeRate,
   formatInt,
   formatKRWCompact,
@@ -101,17 +102,25 @@ function buildThemesFromAPI(rankItems, codeThemeMap) {
   const map = {};
   for (const r of rankItems) {
     const entry = codeThemeMap[r.code];
-    if (!entry) continue;
-    const t = entry.theme;
-    if (t.startsWith('ETF')) continue; // ETF 테마는 제외
-    if (!map[t]) map[t] = { theme: t, color: entry.color, count: 0, value: 0, leader: null };
-    map[t].count += 1;
-    map[t].value += r.trade_value || 0;
-    if (!map[t].leader || r.change_rate > map[t].leader.change_rate) {
-      map[t].leader = r;
-    }
+    const theme = entry?.theme || '기타';
+    const color = entry?.color || '#4b5563';
+    if (theme.startsWith('ETF')) continue; // ETF 테마 카테고리도 제외
+    if (!map[theme]) map[theme] = { theme, color, stocks: [], value: 0 };
+    map[theme].stocks.push(r);
+    map[theme].value += r.trade_value || 0;
   }
-  return Object.values(map).sort((a, b) => b.value - a.value);
+  const result = Object.values(map).map((g) => {
+    g.stocks.sort((a, b) => (b.trade_value || 0) - (a.trade_value || 0));
+    g.count = g.stocks.length;
+    g.leader = [...g.stocks].sort((a, b) => b.change_rate - a.change_rate)[0];
+    return g;
+  });
+  // '기타' 제일 뒤로, 나머지는 거래대금 내림차순
+  return result.sort((a, b) => {
+    if (a.theme === '기타') return 1;
+    if (b.theme === '기타') return -1;
+    return b.value - a.value;
+  });
 }
 
 // ── 시장 수급 (개인/기관/외인) ──────────────────────────────────
@@ -292,13 +301,13 @@ export default function Overview({ onSelectCode }) {
       try {
         const [indexResult, rankData, invData] = await Promise.all([
           api.index(),
-          api.volumeRank({ topN: 30 }),
+          api.volumeRank({ topN: 60 }),
           api.investorSummary(30),
         ]);
         if (cancelled) return;
         setIndexData(indexResult);
-        setTop(rankData.items || []);
-        setInvestorItems(invData.items || []);
+        setTop(excludeETF(rankData.items));
+        setInvestorItems(excludeETF(invData.items));
         setErr(null);
       } catch (e) {
         if (!cancelled) setErr(e.message);
@@ -357,64 +366,72 @@ export default function Overview({ onSelectCode }) {
         <FlowHistoryChart label="KOSDAQ" history={flow?.kosdaq?.history} loading={flowLoading} />
       </div>
 
-      {/* 주도 테마 */}
-      <Card title="오늘의 주도 테마" subtitle="거래대금 기준 자동 추출 (ETF 제외)">
+      {/* 주도 테마 (상위 60종목, ETF 제외, 섹터별 묶음) */}
+      <Card
+        title="오늘의 주도 테마"
+        subtitle={`거래대금 상위 60개 · ${top.length}종목 · ETF 제외`}
+      >
         {themeList.length === 0 ? (
           <div className="text-xs text-fg-muted">{loading ? '조회 중…' : '감지된 테마 없음'}</div>
         ) : (
-          <div className="flex flex-col gap-1.5">
-            {themeList.map((t, i) => (
-              <button
-                key={t.theme}
-                onClick={() => t.leader && onSelectCode?.(t.leader.code)}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-md bg-bg-inner border border-border hover:border-accent/60 transition-colors text-left"
-                style={{ borderLeftWidth: 3, borderLeftColor: t.color }}
+          <div className="space-y-3">
+            {themeList.map((g, i) => (
+              <div
+                key={g.theme}
+                className="rounded-lg border border-border overflow-hidden"
+                style={{ borderLeftWidth: 3, borderLeftColor: g.color }}
               >
-                <span className="text-xs text-fg-muted tabular-nums w-5 shrink-0">#{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-sm text-fg-white font-semibold">{t.theme}</span>
-                    <span className="text-[11px] text-fg-muted">{t.count}종목</span>
-                  </div>
-                  {t.leader && (
-                    <div className="text-[11px] text-fg-muted truncate">
-                      대장: <span className="text-fg-bright">{t.leader.name}</span>{' '}
-                      <span className={changeColor(t.leader.change_rate)}>
-                        {formatChangeRate(t.leader.change_rate)}
+                {/* 테마 헤더 */}
+                <div className="flex items-center gap-3 px-3 py-2 bg-bg-inner">
+                  <span className="text-xs text-fg-muted tabular-nums w-6 shrink-0">#{i + 1}</span>
+                  <div className="flex-1 min-w-0 flex items-baseline gap-2 flex-wrap">
+                    <span className="text-sm text-fg-white font-semibold" style={{ color: g.color }}>
+                      {g.theme}
+                    </span>
+                    <span className="text-[11px] text-fg-muted">{g.count}종목</span>
+                    {g.leader && (
+                      <span className="text-[11px] text-fg-muted">
+                        · 대장 <span className="text-fg-bright">{g.leader.name}</span>{' '}
+                        <span className={changeColor(g.leader.change_rate)}>
+                          {formatChangeRate(g.leader.change_rate)}
+                        </span>
                       </span>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                  <span className="text-sm text-accent font-semibold tabular-nums shrink-0">
+                    {formatKRWCompact(g.value)}
+                  </span>
                 </div>
-                <span className="text-sm text-accent font-semibold tabular-nums shrink-0">
-                  {formatKRWCompact(t.value)}
-                </span>
-              </button>
+                {/* 종목 리스트 */}
+                <table className="w-full text-xs">
+                  <tbody>
+                    {g.stocks.map((s) => (
+                      <tr
+                        key={s.code}
+                        onClick={() => onSelectCode?.(s.code)}
+                        className="border-t border-border/40 hover:bg-bg-inner cursor-pointer"
+                      >
+                        <td className="py-1.5 px-3">
+                          <div className="text-fg-white font-medium">{s.name}</div>
+                          <div className="text-[10px] text-fg-muted">{s.code}</div>
+                        </td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-fg-white">
+                          {formatInt(s.price)}
+                        </td>
+                        <td className={`py-1.5 px-3 text-right tabular-nums ${changeColor(s.change_rate)}`}>
+                          {formatChangeRate(s.change_rate)}
+                        </td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-fg-muted">
+                          {formatKRWCompact(s.trade_value)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ))}
           </div>
         )}
-      </Card>
-
-      {/* 거래대금 TOP 10 */}
-      <Card title="거래대금 TOP 10" right={err && <span className="text-warn text-xs">{err}</span>}>
-        {loading && <div className="text-xs text-fg-muted mb-2">조회 중…</div>}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {top.slice(0, 10).map((r) => (
-            <button
-              key={r.code}
-              onClick={() => onSelectCode?.(r.code)}
-              className="text-left p-2 sm:p-3 rounded-md bg-bg-inner border border-border hover:border-accent/60 transition-colors"
-            >
-              <div className="text-sm text-fg-white font-bold truncate">{r.name}</div>
-              <div className="text-[10px] text-fg-muted">{r.code}</div>
-              <div className="mt-1.5 text-sm text-fg-white tabular-nums">{formatInt(r.price)}</div>
-              <div className={`text-xs ${changeColor(r.change_rate)}`}>{formatChangeRate(r.change_rate)}</div>
-              <div className="text-[10px] text-fg-muted mt-0.5">{formatKRWCompact(r.trade_value)}</div>
-            </button>
-          ))}
-          {top.length === 0 && !loading && (
-            <div className="col-span-5 py-8 text-center text-fg-muted text-sm">데이터 없음</div>
-          )}
-        </div>
       </Card>
 
       {/* 외국인 / 기관 순매수 TOP 10 */}

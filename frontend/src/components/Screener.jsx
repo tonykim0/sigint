@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../utils/api.js';
 import {
   changeColor,
+  excludeETF,
   formatChangeRate,
   formatInt,
   formatKRWCompact,
@@ -167,7 +168,7 @@ function ClosingBetTab({ onSelectCode, onGoJournal }) {
 
   const rows = useMemo(() => {
     if (!data?.stocks) return [];
-    return data.stocks.map((s) => {
+    return excludeETF(data.stocks).map((s) => {
       const memo = memos[s.code] || { hasMaterial: false, note: '' };
       const total = s.pass_count + (memo.hasMaterial ? 1 : 0);
       return { ...s, memo, total };
@@ -360,7 +361,7 @@ function PullbackTab({ onSelectCode }) {
 
   const rows = useMemo(() => {
     if (!data?.stocks) return [];
-    return data.stocks.map((s) => ({
+    return excludeETF(data.stocks).map((s) => ({
       ...s,
       memo: memos[s.code] || { hasMaterial: false, note: '' },
       total: s.pass_count + (memos[s.code]?.hasMaterial ? 1 : 0),
@@ -508,7 +509,7 @@ function BreakoutTab({ onSelectCode }) {
     };
   }, []);
 
-  const rows = data?.stocks || [];
+  const rows = excludeETF(data?.stocks || []);
 
   return (
     <div>

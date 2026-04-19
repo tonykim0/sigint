@@ -30,6 +30,25 @@ export function changeColor(rate) {
   return rate > 0 ? 'text-up' : 'text-down';
 }
 
+// ETF/ETN 감지 — 이름 prefix 기준. 국내 주요 운용사 브랜드를 매칭.
+const ETF_PREFIXES = [
+  'KODEX', 'TIGER', 'KBSTAR', 'ACE', 'ARIRANG', 'HANARO', 'KOSEF',
+  'KINDEX', 'FOCUS', 'SOL', 'TIMEFOLIO', 'WOORI', 'PLUS', 'TREX',
+  'SMART', 'HK S&P', 'RISE', 'SOXX', '파워',
+];
+
+export function isETF(name) {
+  if (!name) return false;
+  const n = name.toUpperCase();
+  if (n.includes(' ETN')) return true;
+  if (n.startsWith('INVERSE') || n.startsWith('KOSPI')) return true;
+  return ETF_PREFIXES.some((p) => n.startsWith(p.toUpperCase()));
+}
+
+export function excludeETF(items) {
+  return (items || []).filter((r) => !isETF(r.name));
+}
+
 export function formatTime(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;

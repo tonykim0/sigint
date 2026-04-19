@@ -13,6 +13,7 @@ import {
 import { api } from '../utils/api.js';
 import {
   changeColor,
+  excludeETF,
   formatChangeRate,
   formatInt,
   formatKRWCompact,
@@ -32,11 +33,12 @@ export default function SupplyDemand({ onSelectCode }) {
 
     async function loadSupplyDemand() {
       try {
-        const rk = await api.volumeRank({ topN: 10 });
+        const rk = await api.volumeRank({ topN: 30 });
         if (cancelled) return;
-        // 10종목에 대해 투자자별 병렬 조회, 가장 최근일 하나만 사용
+        // ETF 제외 후 top 10 선택
+        const stocks = excludeETF(rk.items).slice(0, 10);
         const results = await Promise.all(
-          (rk.items || []).map(async (r) => {
+          stocks.map(async (r) => {
             try {
               const inv = await api.investorTrend(r.code);
               const latest = inv.items?.[0];
