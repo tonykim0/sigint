@@ -8,6 +8,7 @@ import {
   formatKRWCompact,
 } from '../utils/format.js';
 import Card from './Card.jsx';
+import InvestorTop10 from './InvestorTop10.jsx';
 
 const MARKETS = [
   { id: 'ALL', label: 'ALL' },
@@ -113,6 +114,15 @@ export default function VolumeRank({ onSelectCode }) {
   const [view, setView] = useState('list');
   const [refreshSec, setRefreshSec] = useState(15);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [investorItems, setInvestorItems] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.investorSummary(30)
+      .then((d) => { if (!cancelled) setInvestorItems(excludeETF(d.items)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     api
@@ -196,6 +206,7 @@ export default function VolumeRank({ onSelectCode }) {
   }
 
   return (
+    <div className="space-y-4">
     <Card
       title="거래대금 상위"
       subtitle={`TOP ${items.length}`}
@@ -440,5 +451,24 @@ export default function VolumeRank({ onSelectCode }) {
         </div>
       )}
     </Card>
+
+    {/* 외국인/기관 순매수 TOP 10 */}
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <InvestorTop10
+        items={investorItems}
+        field="foreign_value"
+        title="외국인 순매수 TOP 10"
+        color="#3b82f6"
+        onSelectCode={onSelectCode}
+      />
+      <InvestorTop10
+        items={investorItems}
+        field="institution_value"
+        title="기관 순매수 TOP 10"
+        color="#a78bfa"
+        onSelectCode={onSelectCode}
+      />
+    </div>
+    </div>
   );
 }
