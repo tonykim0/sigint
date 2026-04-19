@@ -150,7 +150,22 @@ def _get(path: str, tr_id: str, params: dict[str, Any]) -> dict[str, Any]:
 # --- Endpoints ---------------------------------------------------------------
 
 
-def volume_rank(market: str = "ALL") -> list[dict[str, Any]]:
+_VR_CACHE: dict[str, Any] = {}
+_VR_TTL = 90.0  # 90초
+
+
+def volume_rank(market: str = "ALL", force: bool = False) -> list[dict[str, Any]]:
+    import time as _time
+    key = market.upper()
+    cached = _VR_CACHE.get(key)
+    if not force and cached and _time.time() - cached[0] < _VR_TTL:
+        return cached[1]
+    result = _volume_rank_uncached(market)
+    _VR_CACHE[key] = (_time.time(), result)
+    return result
+
+
+def _volume_rank_uncached(market: str = "ALL") -> list[dict[str, Any]]:
     """거래대금 순위 조회 (KIS volume-rank TR은 30개 상한이라
     보통주/우선주 나눠서 호출 후 거래대금 순으로 합친 뒤 중복 제거).
 

@@ -71,7 +71,7 @@ def _filtered_top60() -> list[dict[str, Any]]:
 _CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 _SWING_CACHE: dict[str, Any] = {"pullback": None, "breakout": None, "ts_pb": 0.0, "ts_br": 0.0}
 _REGIME_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
-_CACHE_TTL = 60.0
+_CACHE_TTL = 360.0  # 6분 (워밍업 주기 5분 + 여유)
 _CACHE_LOCK = threading.Lock()
 _SWING_LOCK = threading.Lock()
 _REGIME_LOCK = threading.Lock()

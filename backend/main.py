@@ -34,6 +34,7 @@ from schemas import (
     JournalStatsResponse,
     JournalUpdateRequest,
 )
+import screener as _screener_mod
 from screener import breakout_swing, closing_bet, market_regime, pullback_swing
 import stock_db
 
@@ -73,6 +74,9 @@ def _warmup_cycle() -> None:
         ("market_flow", lambda: market_flow_mod.market_flow(force=False)),
         ("theme_trend", lambda: theme_trend_mod.theme_trend(days=7, force=False)),
         ("investor_summary", lambda: _warmup_investor_summary()),
+        ("closing_bet", lambda: closing_bet(force=False)),
+        ("pullback_swing", lambda: pullback_swing(force=False)),
+        ("breakout_swing", lambda: breakout_swing(force=False)),
     ]
     for name, fn in tasks:
         try:
