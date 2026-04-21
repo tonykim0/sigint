@@ -1,10 +1,13 @@
 """KIS OpenAPI 클라이언트 — 인증, 토큰 캐싱, 공통 요청 헬퍼."""
 from __future__ import annotations
 
+import logging
 import json
 import os
+import socket
 import time
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,6 +18,11 @@ from dotenv import load_dotenv
 
 from cache_utils import TTLCache
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
+
 # KIS API 호출 공용 세션 — TCP/TLS 연결 재사용 (keep-alive)
 # 매 호출마다 새 핸드셰이크(50~100ms)를 피한다.
 _SESSION = requests.Session()
@@ -24,6 +32,8 @@ _SESSION.mount(
 )
 
 load_dotenv(Path(__file__).with_name(".env"))
+
+log = logging.getLogger("uvicorn.error")
 
 APP_KEY = os.getenv("KIS_APP_KEY", "").strip()
 APP_SECRET = os.getenv("KIS_APP_SECRET", "").strip()
@@ -45,38 +55,115 @@ def _resolve_token_cache_path() -> Path:
 
 
 TOKEN_CACHE_PATH = _resolve_token_cache_path()
+TOKEN_LOCK_PATH = TOKEN_CACHE_PATH.with_suffix(".lock")
 _TOKEN_LOCK = threading.Lock()
 _TOKEN_STATE: dict[str, Any] = {"access_token": None, "expires_at": 0.0}
+_TOKEN_MIN_VALID_SECONDS = 60.0
 
 
 class KISError(RuntimeError):
     """KIS API가 rt_cd != '0' 을 반환했거나 통신 오류가 발생했을 때."""
 
 
-def _load_token_from_disk() -> None:
-    if not TOKEN_CACHE_PATH.exists():
+def _token_expiry_label(expires_at: float) -> str:
+    return datetime.fromtimestamp(expires_at).isoformat(timespec="seconds")
+
+
+@contextmanager
+def _token_file_lock(timeout_seconds: float = 10.0):
+    TOKEN_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handle = TOKEN_LOCK_PATH.open("a+", encoding="utf-8")
+    if fcntl is None:
+        try:
+            yield
+        finally:
+            handle.close()
         return
+
+    deadline = time.time() + timeout_seconds
+    while True:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.time() >= deadline:
+                log.warning("KIS token lock wait exceeded %.1fs, blocking until released", timeout_seconds)
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                break
+            time.sleep(0.05)
+
     try:
-        data = json.loads(TOKEN_CACHE_PATH.read_text())
-        if data.get("access_token") and data.get("expires_at", 0) > time.time() + 60:
-            _TOKEN_STATE.update(data)
-    except (json.JSONDecodeError, OSError):
-        pass
+        yield
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _read_token_from_disk(
+    min_valid_seconds: float = _TOKEN_MIN_VALID_SECONDS,
+) -> dict[str, Any] | None:
+    if not TOKEN_CACHE_PATH.exists():
+        return None
+    try:
+        data = json.loads(TOKEN_CACHE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        log.warning("KIS token cache is corrupted at %s: %s", TOKEN_CACHE_PATH, exc)
+        return None
+    except OSError as exc:
+        log.warning("KIS token cache could not be read at %s: %s", TOKEN_CACHE_PATH, exc)
+        return None
+
+    expires_at = float(data.get("expires_at") or 0.0)
+    access_token = str(data.get("access_token") or "")
+    if not access_token or expires_at <= time.time() + min_valid_seconds:
+        return None
+    return {"access_token": access_token, "expires_at": expires_at}
+
+
+def _load_token_from_disk(
+    min_valid_seconds: float = _TOKEN_MIN_VALID_SECONDS,
+) -> dict[str, Any] | None:
+    data = _read_token_from_disk(min_valid_seconds=min_valid_seconds)
+    if data is not None:
+        _TOKEN_STATE.update(data)
+    return data
 
 
 def _save_token_to_disk(token: str, expires_at: float) -> None:
+    payload = {
+        "access_token": token,
+        "expires_at": expires_at,
+        "issued_at": time.time(),
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+    }
+    temp_path = TOKEN_CACHE_PATH.with_name(f"{TOKEN_CACHE_PATH.name}.{os.getpid()}.tmp")
     try:
-        TOKEN_CACHE_PATH.write_text(
-            json.dumps({"access_token": token, "expires_at": expires_at})
+        temp_path.write_text(json.dumps(payload), encoding="utf-8")
+        temp_path.replace(TOKEN_CACHE_PATH)
+        log.info(
+            "KIS token cache saved to %s (expires %s)",
+            TOKEN_CACHE_PATH,
+            _token_expiry_label(expires_at),
         )
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("KIS token cache could not be written at %s: %s", TOKEN_CACHE_PATH, exc)
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
-def _issue_token() -> str:
+def _issue_token(reason: str) -> str:
     if not APP_KEY or not APP_SECRET:
         raise KISError("KIS_APP_KEY / KIS_APP_SECRET 환경변수가 설정되지 않았습니다.")
 
+    log.warning(
+        "issuing new KIS access token (reason=%s, pid=%s, cache=%s)",
+        reason,
+        os.getpid(),
+        TOKEN_CACHE_PATH,
+    )
     url = f"{BASE_URL}/oauth2/tokenP"
     payload = {
         "grant_type": "client_credentials",
@@ -97,24 +184,36 @@ def _issue_token() -> str:
     _TOKEN_STATE["access_token"] = token
     _TOKEN_STATE["expires_at"] = expires_at
     _save_token_to_disk(token, expires_at)
+    log.warning("new KIS access token issued (expires %s)", _token_expiry_label(expires_at))
     return token
 
 
 def get_access_token(force_refresh: bool = False) -> str:
     """유효한 Bearer 토큰 반환. 만료 5분 전부터 자동 재발급."""
     with _TOKEN_LOCK:
-        if not force_refresh and _TOKEN_STATE["access_token"] is None:
-            _load_token_from_disk()
+        current_token = _TOKEN_STATE["access_token"]
+        with _token_file_lock():
+            disk_token = _load_token_from_disk()
 
-        token = _TOKEN_STATE["access_token"]
-        if (
-            not force_refresh
-            and token
-            and _TOKEN_STATE["expires_at"] > time.time()
-        ):
-            return token
+            token = _TOKEN_STATE["access_token"]
+            if (
+                not force_refresh
+                and token
+                and _TOKEN_STATE["expires_at"] > time.time()
+            ):
+                return token
 
-        return _issue_token()
+            if force_refresh and disk_token:
+                refreshed_token = disk_token["access_token"]
+                if refreshed_token and refreshed_token != current_token:
+                    log.warning(
+                        "reusing refreshed KIS token from disk cache at %s",
+                        TOKEN_CACHE_PATH,
+                    )
+                    return refreshed_token
+
+            reason = "forced_refresh" if force_refresh else "cache_miss"
+            return _issue_token(reason=reason)
 
 
 def _headers(tr_id: str) -> dict[str, str]:
@@ -136,6 +235,7 @@ def _get(path: str, tr_id: str, params: dict[str, Any]) -> dict[str, Any]:
         resp = _SESSION.get(url, headers=_headers(tr_id), params=params, timeout=10)
 
         if resp.status_code == 401 and attempts <= 2:
+            log.warning("KIS returned 401 for %s %s, forcing token refresh", tr_id, path)
             get_access_token(force_refresh=True)
             continue
 

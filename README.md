@@ -26,10 +26,13 @@ KIS_APP_SECRET=발급받은_시크릿키
 KIS_ACCOUNT_NO=계좌번호8자리-00
 KIS_IS_MOCK=false
 CORS_ORIGINS=http://localhost:5173
+ENABLE_KIS_WARMUP=0
 EOF
 
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+실계좌 기준으로는 `ENABLE_KIS_WARMUP=0` 을 유지하는 편이 안전합니다. `--reload` 는 저장할 때마다 백엔드를 재시작하므로, 토큰 캐시가 없거나 다른 런타임과 동시에 돌면 접근 토큰이 여러 번 발급될 수 있습니다.
 
 ### 2. 프론트엔드
 

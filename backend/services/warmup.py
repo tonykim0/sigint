@@ -64,6 +64,11 @@ def _next_interval_seconds() -> float:
     return 600.0
 
 
+def _kis_warmup_enabled() -> bool:
+    value = os.getenv("ENABLE_KIS_WARMUP", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _warmup_loop() -> None:
     _time.sleep(1)
     while True:
@@ -76,12 +81,19 @@ def _warmup_loop() -> None:
 @asynccontextmanager
 async def lifespan(_app):
     initialize_db()
-    if os.getenv("DISABLE_WARMUP") != "1":
-        if _WARMUP_ONCE.get("started") is None:
-            _WARMUP_ONCE.set("started", True)
-            threading.Thread(
-                target=_warmup_loop,
-                name="sigint-warmup",
-                daemon=True,
-            ).start()
+    if os.getenv("DISABLE_WARMUP") == "1":
+        log.info("background warmup disabled by DISABLE_WARMUP=1")
+        yield
+        return
+    if not _kis_warmup_enabled():
+        log.info("KIS warmup disabled by default; set ENABLE_KIS_WARMUP=1 to opt in")
+        yield
+        return
+    if _WARMUP_ONCE.get("started") is None:
+        _WARMUP_ONCE.set("started", True)
+        threading.Thread(
+            target=_warmup_loop,
+            name="sigint-warmup",
+            daemon=True,
+        ).start()
     yield
